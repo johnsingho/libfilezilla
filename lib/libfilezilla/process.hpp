@@ -40,6 +40,8 @@ public:
 	 */
 	bool spawn(native_string const& cmd, std::vector<native_string> const& args = std::vector<native_string>());
 
+	bool spawn(std::vector<native_string> const& command_with_args);
+
 	/** \brief Stops the spawned process
 	 *
 	 * This function doesn't actually kill the process, it merely closes the pipes.
@@ -67,14 +69,25 @@ public:
 	 */
 	bool write(char const* buffer, unsigned int len);
 
-	inline bool write(std::string const& s) {
-		return write(s.c_str(), static_cast<unsigned int>(s.size()));
+	inline bool write(std::string_view const& s) {
+		return write(s.data(), static_cast<unsigned int>(s.size()));
 	}
 
 private:
 	class impl;
 	impl* impl_;
 };
+
+
+/** \brief Starts a detached process
+ *
+ * This function takes care of properly quoting and escaping the the program's path and its arguments.
+ *
+ * \param cmd_with_args The full path of the program to execute and any additional arguments
+ *
+ * \note May return \c true even if the process cannot be started.
+ */
+bool FZ_PUBLIC_SYMBOL spawn_detached_process(std::vector<native_string> const& cmd_with_args);
 
 }
 

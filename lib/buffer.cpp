@@ -23,7 +23,7 @@ buffer::buffer(buffer const& buf)
 	}
 }
 
-buffer::buffer(buffer && buf)
+buffer::buffer(buffer && buf) noexcept
 {
 	data_ = buf.data_;
 	buf.data_ = nullptr;
@@ -31,6 +31,7 @@ buffer::buffer(buffer && buf)
 	buf.pos_ = nullptr;
 	size_ = buf.size_;
 	capacity_ = buf.capacity_;
+	buf.capacity_ = 0;
 }
 
 unsigned char* buffer::get(size_t write_size)
@@ -73,7 +74,7 @@ buffer& buffer::operator=(buffer const& buf)
 	return *this;
 }
 
-buffer& buffer::operator=(buffer && buf)
+buffer& buffer::operator=(buffer && buf) noexcept
 {
 	if (this != &buf) {
 		delete[] data_;
@@ -83,6 +84,7 @@ buffer& buffer::operator=(buffer && buf)
 		buf.pos_ = nullptr;
 		size_ = buf.size_;
 		capacity_ = buf.capacity_;
+		buf.capacity_ = 0;
 	}
 
 	return *this;
@@ -125,9 +127,9 @@ void buffer::append(unsigned char const* data, size_t len)
 	size_ += len;
 }
 
-void buffer::append(std::string const& str)
+void buffer::append(std::string_view const& str)
 {
-	append(reinterpret_cast<unsigned char const*>(str.c_str()), str.size());
+	append(reinterpret_cast<unsigned char const*>(str.data()), str.size());
 }
 
 void buffer::reserve(size_t capacity)

@@ -1,8 +1,8 @@
-AC_INIT([libfilezilla],[0.15.1],[tim.kosse@filezilla-project.org],[],[https://lib.filezilla-project.org/])
+AC_INIT([libfilezilla],[0.18.0],[tim.kosse@filezilla-project.org],[],[https://lib.filezilla-project.org/])
 AC_CONFIG_HEADERS([lib/libfilezilla/private/config.hpp])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR(config)
-AM_INIT_AUTOMAKE([dist-bzip2])
+AM_INIT_AUTOMAKE([dist-bzip2 no-dist-gzip subdir-objects])
 
 AC_CANONICAL_HOST
 
@@ -14,6 +14,20 @@ LT_INIT([win32-dll])
 LT_LANG([C++])
 
 AC_CACHE_SAVE
+
+
+AC_ARG_ENABLE(locales, AS_HELP_STRING([--enable-locales],[Build message catalogs]), \
+        [locales="$enableval"], [locales="yes"])
+
+AC_ARG_ENABLE(localesonly, AS_HELP_STRING([--enable-localesonly],[Just build locales]), \
+        [localesonly="$enableval"], [localesonly="no"])
+
+if test "$locales" != "yes" -a "$localesonly" = "yes"; then
+  AC_MSG_ERROR([invalid flags: --disable-locales cannot be used together with --enable-localesonly])
+fi
+
+
+if ! test "$localesonly" = "yes"; then
 
 if test "X$GCC" = Xyes; then
   AX_APPEND_FLAG(-Wall, CFLAGS)
@@ -37,7 +51,7 @@ AX_CHECK_LINK_FLAG([-Wl,-no_weak_imports], [
 ])
 
 # Check for C++14 support
-CXX_COMPILE_STDCXX_14([],[mandatory])
+AX_CXX_COMPILE_STDCXX_17([noext],[mandatory])
 CHECK_LIBCXX
 
 # To make sure stat.st_size is a 64bit (or larger) value
@@ -54,6 +68,11 @@ AC_CHECK_DECLS([CLOCK_MONOTONIC], [], [], [[#include <time.h>]])
 
 # Some platforms, e.g. OS X, lack posix_fadvise
 AC_CHECK_FUNCS(posix_fadvise)
+
+AC_CHECK_FUNCS(poll pipe2 accept4)
+
+# eventfd is preferred over selfpipe, half the descriptors after all.
+CHECK_EVENTFD
 
 # Some platforms have no d_type entry in their dirent structure
 gl_CHECK_TYPE_STRUCT_DIRENT_D_TYPE
@@ -74,7 +93,7 @@ else
 fi
 
 if test "$windows" = "1"; then
-  libdeps=
+  libdeps=-lws2_32
 else
   libdeps=-lpthread
   CHECK_ICONV([libdeps="$libdeps -liconv"])
@@ -118,11 +137,27 @@ AC_SUBST(HOGWEED_LIBS)
 AC_SUBST(HOGWEED_CFLAGS)
 
 
+# GnuTLS
+# ------
+
+PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.5.7],, [
+  AC_MSG_ERROR([GnuTLS 3.5.7 or greater was not found. You can get it from https://gnutls.org/])
+])
+
+AC_SUBST(GNUTLS_LIBS)
+AC_SUBST(GNUTLS_CFLAGS)
+
+AC_ARG_ENABLE(gnutlssystemciphers, AS_HELP_STRING([--enable-gnutlssystemciphers],[Enables the use of gnutls system ciphers.]),
+  [gnutlssystemciphers="$enableval"], [gnutlssystemciphers="no"])
+
+if test "$gnutlssystemciphers" = "yes"; then
+  AC_DEFINE(FZ_USE_GNUTLS_SYSTEM_CIPHERS, 1, [Set to 1 to use ciphers defined in system policy.])
+fi
+
+
 # Check for windres on MinGW builds
 # ---------------------------------
 
-WINDRESFLAGS=
-use_resourcefile=
 AC_MSG_CHECKING([whether to use windres])
 if test "$windows" = "1"; then
   AC_MSG_RESULT([yes])
@@ -130,7 +165,6 @@ if test "$windows" = "1"; then
   if test "x$WINDRES" = "x"; then
 	AC_MSG_ERROR([windres could not be found, please make sure this program is within your path.])
   fi
-  use_resourcefile=true
 else
   AC_MSG_RESULT([no])
 fi
@@ -208,7 +242,9 @@ PKG_PROG_PKG_CONFIG
 # CppUnit tests
 # -------------
 
-PKG_CHECK_MODULES(CPPUNIT, [cppunit >= 1.13.0], [has_cppunit=yes],[:])
+PKG_CHECK_MODULES(CPPUNIT, [cppunit >= 1.13.0], [have_cppunit=yes],[:])
+
+fi
 
 # Doxygen
 # -------
@@ -216,19 +252,79 @@ PKG_CHECK_MODULES(CPPUNIT, [cppunit >= 1.13.0], [has_cppunit=yes],[:])
 DX_PS_FEATURE(OFF)
 DX_INIT_DOXYGEN(libfilezilla, Doxyfile)
 
+
+# Everything translation related
+# ------------------------------
+
+LIBFILEZILLA_LINGUAS=
+LIBFILEZILLA_LINGUAS_PO=
+LIBFILEZILLA_LINGUAS_MO=
+LIBFILEZILLA_LINGUAS_PO_NEW=
+
+if test "$locales" = "yes"; then
+  AC_PATH_PROG(xgettext, xgettext)
+  if test -z "$xgettext"; then
+    AC_MSG_ERROR([xgettext not found, please install the GNU gettext package and make sure xgettext is in the path.])
+  fi
+
+  AC_PATH_PROG(msgfmt, msgfmt)
+  if test -z "$msgfmt"; then
+    AC_MSG_ERROR([ msgfmt not found, please install the GNU gettext package and make sure  msgfmt is in the path.])
+  fi
+
+  FZ_PATH_PROG_VER(msgmerge, msgmerge, 0.11.0)
+  if test -z "$msgmerge"; then
+    AC_MSG_ERROR([msgmerge not found or too old, please install a current version of the GNU gettext package and make sure msgmerge is in the path.])
+  fi
+
+  AC_MSG_CHECKING([available libfilezilla message catalogs])
+
+  if /bin/ls > /dev/null; then
+    LSPROG='/bin/ls'
+  else
+    LSPROG='ls'
+  fi
+
+  if test x$srcdir = x; then
+    path="locales"
+  else
+    path="$srcdir/locales"
+  fi
+  for i in `$LSPROG $path/*.po`; do
+    i=${i%.*}
+    i=${i##*/}
+    LIBFILEZILLA_LINGUAS_PO=$LIBFILEZILLA_LINGUAS_PO${LIBFILEZILLA_LINGUAS_PO:+ }\$\(srcdir\)/$i.po
+    LIBFILEZILLA_LINGUAS_PO_NEW=$LIBFILEZILLA_LINGUAS_PO_NEW${LIBFILEZILLA_LINGUAS_PO_NEW:+ }$i.po.new
+    LIBFILEZILLA_LINGUAS=$LIBFILEZILLA_LINGUAS${LIBFILEZILLA_LINGUAS:+ }$i
+    LIBFILEZILLA_LINGUAS_MO=$LIBFILEZILLA_LINGUAS_MO${LIBFILEZILLA_LINGUAS_MO:+ }$i.mo
+  done
+
+  AC_MSG_RESULT([$LIBFILEZILLA_LINGUAS])
+fi
+
+AC_SUBST(LIBFILEZILLA_LINGUAS)
+AC_SUBST(LIBFILEZILLA_LINGUAS_PO)
+AC_SUBST(LIBFILEZILLA_LINGUAS_PO_NEW)
+AC_SUBST(LIBFILEZILLA_LINGUAS_MO)
+
 # Output automake conditionals
 # ----------------------------
 
-AM_CONDITIONAL(USE_RESOURCEFILE, test "$use_resourcefile" = "true")
+AM_CONDITIONAL(FZ_WINDOWS, test "$windows" = "1")
+AM_CONDITIONAL(HAVE_CPPUNIT, [test "$have_cppunit" = "yes"])
+AM_CONDITIONAL([LOCALES_ONLY], [test "$localesonly" = "yes"])
+AM_CONDITIONAL([LOCALES], [test "$locales" = "yes"])
 
 AC_CONFIG_FILES(
   Makefile
   lib/Makefile
   lib/libfilezilla.pc
   lib/libfilezilla/version.hpp
+  lib/windows/version.rc
   demos/Makefile
   doc/Doxyfile
   doc/Makefile
+  locales/Makefile
   tests/Makefile
 )
 

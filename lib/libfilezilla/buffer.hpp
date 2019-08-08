@@ -29,12 +29,12 @@ public:
 	explicit buffer(size_t capacity);
 
 	buffer(buffer const& buf);
-	buffer(buffer && buf);
+	buffer(buffer && buf) noexcept;
 
 	~buffer() { delete[] data_; }
 
 	buffer& operator=(buffer const& buf);
-	buffer& operator=(buffer && buf);
+	buffer& operator=(buffer && buf) noexcept;
 
 	/// Undefined if buffer is empty
 	unsigned char const* get() const { return pos_; }
@@ -81,7 +81,7 @@ public:
 	 * The number of reallocations as result to repeated append are amortized O(1)
 	 */
 	void append(unsigned char const* data, size_t len);
-	void append(std::string const& str);
+	void append(std::string_view const& str);
 
 	bool empty() const { return size_ == 0; }
 	explicit operator bool() const {

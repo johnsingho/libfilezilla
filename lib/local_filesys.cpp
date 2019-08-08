@@ -1,6 +1,6 @@
 #include "libfilezilla/local_filesys.hpp"
-
 #ifndef FZ_WINDOWS
+#include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -97,6 +97,82 @@ local_filesys::type local_filesys::get_file_type(native_string const& path, bool
 	return file;
 #endif
 }
+
+#ifndef FZ_WINDOWS
+namespace {
+local_filesys::type get_file_info_impl(int(*do_stat)(struct stat & buf, char const* path, DIR* dir, bool follow), char const* path, DIR* dir, bool &is_link, int64_t* size, datetime* modification_time, int *mode)
+{
+	struct stat buf;
+	static_assert(sizeof(buf.st_size) >= 8, "The st_size member of struct stat must be 8 bytes or larger.");
+
+	int result = do_stat(buf, path, dir, false);
+	if (result) {
+		is_link = false;
+		if (size) {
+			*size = -1;
+		}
+		if (mode) {
+			*mode = -1;
+		}
+		if (modification_time) {
+			*modification_time = datetime();
+		}
+		return local_filesys::unknown;
+	}
+
+#ifdef S_ISLNK
+	if (S_ISLNK(buf.st_mode)) {
+		is_link = true;
+		result = do_stat(buf, path, dir, true);
+		if (result) {
+			if (size) {
+				*size = -1;
+			}
+			if (mode) {
+				*mode = -1;
+			}
+			if (modification_time) {
+				*modification_time = datetime();
+			}
+			return local_filesys::unknown;
+		}
+	}
+	else
+#endif
+		is_link = false;
+
+	if (modification_time) {
+		*modification_time = datetime(buf.st_mtime, datetime::seconds);
+	}
+
+	if (mode) {
+		*mode = buf.st_mode & 0x777;
+	}
+
+	if (S_ISDIR(buf.st_mode)) {
+		if (size) {
+			*size = -1;
+		}
+		return local_filesys::dir;
+	}
+
+	if (size) {
+		*size = buf.st_size;
+	}
+
+	return local_filesys::file;
+}
+
+local_filesys::type get_file_info_at(char const* path, DIR* dir, bool &is_link, int64_t* size, datetime* modification_time, int *mode)
+{
+	auto do_stat = [](struct stat & buf, char const* path, DIR * dir, bool follow)
+	{
+		return fstatat(dirfd(dir), path, &buf, follow ? 0 : AT_SYMLINK_NOFOLLOW);
+	};
+	return get_file_info_impl(do_stat, path, dir, is_link, size, modification_time, mode);
+}
+}
+#endif
 
 local_filesys::type local_filesys::get_file_info(native_string const& path, bool &is_link, int64_t* size, datetime* modification_time, int *mode)
 {
@@ -196,65 +272,16 @@ local_filesys::type local_filesys::get_file_info(native_string const& path, bool
 		return file;
 	}
 #else
-	struct stat buf;
-	static_assert(sizeof(buf.st_size) >= 8, "The st_size member of struct stat must be 8 bytes or larger.");
-
-	int result = lstat(path.c_str(), &buf);
-	if (result) {
-		is_link = false;
-		if (size) {
-			*size = -1;
+	auto do_stat = [](struct stat & buf, char const* path, DIR*, bool follow)
+	{
+		if (follow) {
+			return stat(path, &buf);
 		}
-		if (mode) {
-			*mode = -1;
+		else {
+			return lstat(path, &buf);
 		}
-		if (modification_time) {
-			*modification_time = datetime();
-		}
-		return unknown;
-	}
-
-#ifdef S_ISLNK
-	if (S_ISLNK(buf.st_mode)) {
-		is_link = true;
-		result = stat(path.c_str(), &buf);
-		if (result) {
-			if (size) {
-				*size = -1;
-			}
-			if (mode) {
-				*mode = -1;
-			}
-			if (modification_time) {
-				*modification_time = datetime();
-			}
-			return unknown;
-		}
-	}
-	else
-#endif
-		is_link = false;
-
-	if (modification_time) {
-		*modification_time = datetime(buf.st_mtime, datetime::seconds);
-	}
-
-	if (mode) {
-		*mode = buf.st_mode & 0x777;
-	}
-
-	if (S_ISDIR(buf.st_mode)) {
-		if (size) {
-			*size = -1;
-		}
-		return dir;
-	}
-
-	if (size) {
-		*size = buf.st_size;
-	}
-
-	return file;
+	};
+	return get_file_info_impl(do_stat, path.c_str(), nullptr, is_link, size, modification_time, mode);
 #endif
 }
 
@@ -295,17 +322,6 @@ bool local_filesys::begin_find_files(native_string path, bool dirs_only)
 		return false;
 	}
 
-	m_raw_path = new char[path.size() + 2048 + 2];
-	m_buffer_length = path.size() + 2048 + 2;
-	strcpy(m_raw_path, path.c_str());
-	if (path != fzT("/")) {
-		m_raw_path[path.size()] = '/';
-		m_file_part = m_raw_path + path.size() + 1;
-	}
-	else {
-		m_file_part = m_raw_path + path.size();
-	}
-
 	return true;
 #endif
 }
@@ -323,9 +339,6 @@ void local_filesys::end_find_files()
 		closedir(dir_);
 		dir_ = nullptr;
 	}
-	delete [] m_raw_path;
-	m_raw_path = nullptr;
-	m_file_part = nullptr;
 #endif
 }
 
@@ -369,10 +382,8 @@ bool local_filesys::get_next_file(native_string& name)
 		if (dirs_only_) {
 #if HAVE_STRUCT_DIRENT_D_TYPE
 			if (entry->d_type == DT_LNK) {
-				bool wasLink;
-				alloc_path_buffer(entry->d_name);
-				strcpy(m_file_part, entry->d_name);
-				if (get_file_info(m_raw_path, wasLink, nullptr, nullptr, nullptr) != dir) {
+				bool wasLink{};
+				if (get_file_info_at(entry->d_name, dir_, wasLink, nullptr, nullptr, nullptr) != dir) {
 					continue;
 				}
 			}
@@ -381,10 +392,8 @@ bool local_filesys::get_next_file(native_string& name)
 			}
 #else
 			// Solaris doesn't have d_type
-			bool wasLink;
-			alloc_path_buffer(entry->d_name);
-			strcpy(m_file_part, entry->d_name);
-			if (get_file_info(m_raw_path, wasLink, nullptr, nullptr, nullptr) != dir) {
+			bool wasLink{};
+			if (get_file_info_at(entry->d_name, dir_, wasLink, nullptr, nullptr, nullptr) != dir) {
 				continue;
 			}
 #endif
@@ -511,10 +520,7 @@ bool local_filesys::get_next_file(native_string& name, bool &is_link, bool &is_d
 #if HAVE_STRUCT_DIRENT_D_TYPE
 		if (dirs_only_) {
 			if (entry->d_type == DT_LNK) {
-				alloc_path_buffer(entry->d_name);
-				strcpy(m_file_part, entry->d_name);
-				type t = get_file_info(m_raw_path, is_link, size, modification_time, mode);
-				if (t != dir) {
+				if (get_file_info_at(entry->d_name, dir_, is_link, size, modification_time, mode) != dir) {
 					continue;
 				}
 
@@ -528,10 +534,7 @@ bool local_filesys::get_next_file(native_string& name, bool &is_link, bool &is_d
 		}
 #endif
 
-		alloc_path_buffer(entry->d_name);
-		strcpy(m_file_part, entry->d_name);
-		type t = get_file_info(m_raw_path, is_link, size, modification_time, mode);
-
+		type t = get_file_info_at(entry->d_name, dir_, is_link, size, modification_time, mode);
 		if (t == unknown) { // Happens for example in case of permission denied
 #if HAVE_STRUCT_DIRENT_D_TYPE
 			t = (entry->d_type == DT_DIR) ? dir : file;
@@ -563,23 +566,6 @@ bool local_filesys::get_next_file(native_string& name, bool &is_link, bool &is_d
 	return false;
 #endif
 }
-
-#ifndef FZ_WINDOWS
-void local_filesys::alloc_path_buffer(char const* filename)
-{
-	int len = strlen(filename);
-	int pathlen = m_file_part - m_raw_path;
-
-	if (len + pathlen >= m_buffer_length) {
-		m_buffer_length = (len + pathlen) * 2;
-		char* tmp = new char[m_buffer_length];
-		memcpy(tmp, m_raw_path, pathlen);
-		delete [] m_raw_path;
-		m_raw_path = tmp;
-		m_file_part = m_raw_path + pathlen;
-	}
-}
-#endif
 
 datetime local_filesys::get_modification_time(native_string const& path)
 {

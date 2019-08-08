@@ -38,7 +38,7 @@
     <ProjectGuid>{E1BC2AC0-F3DD-4892-8CF2-1041A63F7C9C}</ProjectGuid>
     <RootNamespace>libfilezilla</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.15063.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='static_release'">
@@ -54,7 +54,7 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
   </PropertyGroup>
   <PropertyGroup Label="Configuration">
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='static_release'">
@@ -76,6 +76,11 @@
   <PropertyGroup>
     <IntDir>$(OutDir)</IntDir>
   </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='static_debug|Win32'">
     <ClCompile>
       <AdditionalOptions>/MP -Zm200 %(AdditionalOptions)</AdditionalOptions>
@@ -201,10 +206,18 @@
     <ClCompile Include="mutex.cpp" />
     <ClCompile Include="process.cpp" />
     <ClCompile Include="recursive_remove.cpp" />
+    <ClCompile Include="signature.cpp" />
+    <ClCompile Include="socket.cpp" />
+    <ClCompile Include="socket_errors.cpp" />
     <ClCompile Include="string.cpp" />
     <ClCompile Include="thread.cpp" />
     <ClCompile Include="thread_pool.cpp" />
     <ClCompile Include="time.cpp" />
+    <ClCompile Include="tls_info.cpp" />
+    <ClCompile Include="tls_layer.cpp" />
+    <ClCompile Include="tls_layer_impl.cpp" />
+    <ClCompile Include="tls_system_trust_store.cpp" />
+    <ClCompile Include="translate.cpp" />
     <ClCompile Include="uri.cpp" />
     <ClCompile Include="util.cpp" />
     <ClCompile Include="version.cpp" />
@@ -223,6 +236,7 @@
     <ClInclude Include="libfilezilla\iputils.hpp" />
     <ClInclude Include="libfilezilla\libfilezilla.hpp" />
     <ClInclude Include="libfilezilla\local_filesys.hpp" />
+    <ClInclude Include="libfilezilla\logger.hpp" />
     <ClInclude Include="libfilezilla\mutex.hpp" />
     <ClInclude Include="libfilezilla\optional.hpp" />
     <ClInclude Include="libfilezilla\private\defs.hpp" />
@@ -231,13 +245,21 @@
     <ClInclude Include="libfilezilla\process.hpp" />
     <ClInclude Include="libfilezilla\recursive_remove.hpp" />
     <ClInclude Include="libfilezilla\shared.hpp" />
+    <ClInclude Include="libfilezilla\signature.hpp" />
+    <ClInclude Include="libfilezilla\socket.hpp" />
     <ClInclude Include="libfilezilla\string.hpp" />
     <ClInclude Include="libfilezilla\thread.hpp" />
     <ClInclude Include="libfilezilla\thread_pool.hpp" />
     <ClInclude Include="libfilezilla\time.hpp" />
+    <ClInclude Include="libfilezilla\tls_info.hpp" />
+    <ClInclude Include="libfilezilla\tls_layer.hpp" />
+    <ClInclude Include="libfilezilla\tls_system_trust_store.hpp" />
+    <ClInclude Include="libfilezilla\translate.hpp" />
     <ClInclude Include="libfilezilla\uri.hpp" />
     <ClInclude Include="libfilezilla\util.hpp" />
     <ClInclude Include="libfilezilla\version.hpp" />
+    <ClInclude Include="tls_layer_impl.hpp" />
+    <ClInclude Include="tls_system_trust_store_impl.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

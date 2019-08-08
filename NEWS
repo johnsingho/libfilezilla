@@ -1,3 +1,42 @@
+0.18.0 (2019-08-02)
+
++ Added fz::spawn_detached_process
++ Add operator+ to fz::duration
++ *nix: If available, use eventfd instead of a self-pipe
++ fz::to_integral and fz::hex_decode now work with string literals
++ Added fz::listen_socket::fast_accept that only returns a descriptor instead of a fully-initialized fz::socket for use in a tight accept-and-dispatch loop
++ Functions in libfilezilla/iputils.hpp now take string_view as arguments
++ Added fz::socket::set_flags which can atomically enable or disable flags
+- fz::socket not returns an error instead of silently failing in case of file descriptor exhaustion
+- Fix socket errors sometimes not being forwarded in fz::tls_layer when when writing fails in the underlying layer
+- Fix double-closing of socket descriptios if connection establishment fails
+- fz::tls_layer now fails the handshake instead of waiting indefinitely if started on a layer that has progressed passed the connected state
+- Small compile-time improvements to fz::sprintf
+
+0.17.1 (2019-06-21)
+
++ Added support for detached signatures
+- Fixed crash if using the system trust store
+
+0.17.0 (2019-06-17)
+
++ libfilezilla now requires C++17
++ Changed a lot of functions to use std::string_view
++ Added fz::socket_layer as base class for layers on top of sockets
++ Added fz::tls_layer, a Transport Layer Security layer, requiring GnuTLS 3.5.7 or later
++ Added fz::translate for gettext-style translatable strings. GNU Gettext is now a built-time (but not runtime) dependency
++ Added fz::bitscan and fz::bitscan_reverse to get the index of least and most significant bit set
++ Added fz::logger_interface as a base for logging system
+- *nix: Small speed-up of fz::local_filesys through the use of fstatat()
+
+0.16.0 (2019-04-21)
+
++ Add fz::socket
++ Add operator*= to fz::duration
++ fz::event_loop can now also be created using fz::thread_pool or threadless.
+- fz::async_task now releases the thread back to the pool immediately when the task has completed without waiting for the join
+- *nix: Fix file descriptor leaks on exec()
+
 0.15.1 (2018-11-22)
 
 + Add argument to fz::strtok to return empty tokens

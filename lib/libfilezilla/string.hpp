@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /** \file
@@ -30,22 +31,30 @@ namespace fz {
 
 #ifdef FZ_WINDOWS
 typedef std::wstring native_string;
+typedef std::wstring_view native_string_view;
 #endif
 #if defined(FZ_UNIX) || defined(FZ_MAC)
 typedef std::string native_string;
+typedef std::string_view native_string_view;
 #endif
 
 /** \brief Converts std::string to native_string.
  *
  * \return the converted string on success. On failure an empty string is returned.
  */
-native_string FZ_PUBLIC_SYMBOL to_native(std::string const& in);
+native_string FZ_PUBLIC_SYMBOL to_native(std::string_view const& in);
 
 /** \brief Convert std::wstring to native_string.
  *
  * \return the converted string on success. On failure an empty string is returned.
  */
-native_string FZ_PUBLIC_SYMBOL to_native(std::wstring const& in);
+native_string FZ_PUBLIC_SYMBOL to_native(std::wstring_view const& in);
+
+/// Avoid converting native_string to native_string_view and back to string_view
+template<typename T, typename std::enable_if_t<std::is_same_v<native_string, typename std::decay_t<T>>, int> = 0>
+inline native_string to_native(T const& in) {
+	return in;
+}
 
 /** \brief Locale-sensitive stricmp
  *
@@ -53,8 +62,8 @@ native_string FZ_PUBLIC_SYMBOL to_native(std::wstring const& in);
  *
  * \note does not handle embedded null
  */
-int FZ_PUBLIC_SYMBOL stricmp(std::string const& a, std::string const& b);
-int FZ_PUBLIC_SYMBOL stricmp(std::wstring const& a, std::wstring const& b);
+int FZ_PUBLIC_SYMBOL stricmp(std::string_view const& a, std::string_view const& b);
+int FZ_PUBLIC_SYMBOL stricmp(std::wstring_view const& a, std::wstring_view const& b);
 
 /** \brief Converts ASCII uppercase characters to lowercase as if C-locale is used.
 
@@ -99,25 +108,11 @@ std::wstring::value_type FZ_PUBLIC_SYMBOL toupper_ascii(std::wstring::value_type
 /** \brief tr_tolower_ascii does for strings what tolower_ascii does for individual characters
  */
  // Note: For UTF-8 strings it works on individual octets!
-template<typename String>
-String str_tolower_ascii(String const& s)
-{
-	String ret = s;
-	for (auto& c : ret) {
-		c = tolower_ascii(c);
-	}
-	return ret;
-}
+std::string FZ_PUBLIC_SYMBOL str_tolower_ascii(std::string_view const& s);
+std::wstring FZ_PUBLIC_SYMBOL str_tolower_ascii(std::wstring_view const& s);
 
-template<typename String>
-String str_toupper_ascii(String const& s)
-{
-	String ret = s;
-	for (auto& c : ret) {
-		c = toupper_ascii(c);
-	}
-	return ret;
-}
+std::string FZ_PUBLIC_SYMBOL str_toupper_ascii(std::string_view const& s);
+std::wstring FZ_PUBLIC_SYMBOL str_toupper_ascii(std::wstring_view const& s);
 
 /** \brief Comparator to be used for std::map for case-insentitive keys
  *
@@ -153,10 +148,8 @@ bool equal_insensitive_ascii(String const& a, String const& b)
 /** \brief Converts from std::string in system encoding into std::wstring
  *
  * \return the converted string on success. On failure an empty string is returned.
- *
- * \note Does not handle embedded nulls
  */
-std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::string const& in);
+std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::string_view const& in);
 
 /// Returns identity, that way to_wstring can be called with native_string.
 inline std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::wstring const& in) { return in; }
@@ -179,10 +172,8 @@ std::wstring FZ_PUBLIC_SYMBOL to_wstring_from_utf8(char const* s, size_t len);
 /** \brief Converts from std::wstring into std::string in system encoding
  *
  * \return the converted string on success. On failure an empty string is returned.
- *
- * \note Does not handle embedded nulls
  */
-std::string FZ_PUBLIC_SYMBOL to_string(std::wstring const& in);
+std::string FZ_PUBLIC_SYMBOL to_string(std::wstring_view const& in);
 
 /// Returns identity, that way to_string can be called with native_string.
 inline std::string FZ_PUBLIC_SYMBOL to_string(std::string const& in) { return in; }
@@ -208,7 +199,7 @@ size_t strlen(Char const* str) {
  *
  * \note Does not handle embedded nulls
  */
-std::string FZ_PUBLIC_SYMBOL to_utf8(std::string const& in);
+std::string FZ_PUBLIC_SYMBOL to_utf8(std::string_view const& in);
 
 /** \brief Converts from std::wstring in native encoding into std::string in UTF-8
  *
@@ -216,7 +207,7 @@ std::string FZ_PUBLIC_SYMBOL to_utf8(std::string const& in);
  *
  * \note Does not handle embedded nulls
  */
-std::string FZ_PUBLIC_SYMBOL to_utf8(std::wstring const& in);
+std::string FZ_PUBLIC_SYMBOL to_utf8(std::wstring_view const& in);
 
 /// Calls either fz::to_string or fz::to_wstring depending on the passed template argument
 template<typename String, typename Arg>
@@ -283,34 +274,35 @@ bool FZ_PUBLIC_SYMBOL replace_substrings(std::wstring& in, std::wstring const& f
  * \param delims the delimiters to look for
  * \param ignore_empty If true, empty tokens are omitted in the output
  */
-template<typename String, typename Delim, typename Container = std::vector<String>>
-Container strtok(String const& s, Delim const& delims, bool const ignore_empty = true)
-{
-	Container ret;
-
-	typename String::size_type start{}, pos{};
-	do {
-		pos = s.find_first_of(delims, start);
-
-		// Not found, we're at ends;
-		if (pos == String::npos) {
-			if (start < s.size()) {
-				ret.emplace_back(s.substr(start));
-			}
-		}
-		else if (pos > start || !ignore_empty) {
-			// Non-empty substring
-			ret.emplace_back(s.substr(start, pos - start));
-		}
-		start = pos + 1;
-	} while (pos != String::npos);
-
-	return ret;
+std::vector<std::string> FZ_PUBLIC_SYMBOL strtok(std::string_view const& tokens, std::string_view const& delims, bool const ignore_empty = true);
+std::vector<std::wstring> FZ_PUBLIC_SYMBOL strtok(std::wstring_view const& tokens, std::wstring_view const& delims, bool const ignore_empty = true);
+inline auto FZ_PUBLIC_SYMBOL strtok(std::string_view const& tokens, char const delim, bool const ignore_empty = true) {
+	return strtok(tokens, std::string_view(&delim, 1), ignore_empty);
+}
+inline auto FZ_PUBLIC_SYMBOL strtok(std::wstring_view const& tokens, wchar_t const delim, bool const ignore_empty = true) {
+	return strtok(tokens, std::wstring_view(&delim, 1), ignore_empty);
 }
 
-// Converts string to integral type T. If string is not convertible, T() is returned.
+/**
+ * \brief Tokenizes string.
+ *
+ * \warning This function returns string_views, mind the lifetime of the string passed in tokens.
+ *
+ * \param delims the delimiters to look for
+ * \param ignore_empty If true, empty tokens are omitted in the output
+ */
+std::vector<std::string_view> FZ_PUBLIC_SYMBOL strtok_view(std::string_view const& tokens, std::string_view const& delims, bool const ignore_empty = true);
+std::vector<std::wstring_view> FZ_PUBLIC_SYMBOL strtok_view(std::wstring_view const& tokens, std::wstring_view const& delims, bool const ignore_empty = true);
+inline auto FZ_PUBLIC_SYMBOL strtok_view(std::string_view const& tokens, char const delim, bool const ignore_empty = true) {
+	return strtok_view(tokens, std::string_view(&delim, 1), ignore_empty);
+}
+inline auto FZ_PUBLIC_SYMBOL strtok_view(std::wstring_view const& tokens, wchar_t const delim, bool const ignore_empty = true) {
+	return strtok_view(tokens, std::wstring_view(&delim, 1), ignore_empty);
+}
+
+/// \private
 template<typename T, typename String>
-T to_integral(String const& s, T const errorval = T())
+T to_integral_impl(String const& s, T const errorval = T())
 {
 	T ret{};
 
@@ -340,6 +332,23 @@ T to_integral(String const& s, T const errorval = T())
 	}
 }
 
+/// Converts string to integral type T. If string is not convertible, errorval is returned.
+template<typename T>
+T to_integral(std::string_view const& s, T const errorval = T()) {
+	return to_integral_impl<T>(s, errorval);
+}
+
+template<typename T>
+T to_integral(std::wstring_view const& s, T const errorval = T()) {
+	return to_integral_impl<T>(s, errorval);
+}
+
+template<typename T, typename StringType>
+T to_integral(std::basic_string_view<StringType> const& s, T const errorval = T()) {
+	return to_integral_impl<T>(s, errorval);
+}
+
+
 /// \brief Returns true iff the string only has characters in the 7-bit ASCII range
 template<typename String>
 bool str_is_ascii(String const& s) {
@@ -352,45 +361,98 @@ bool str_is_ascii(String const& s) {
 	return true;
 }
 
-/// \brief Return passed string with all leading and trailing whitespace removed
-template<typename String>
-String trimmed(String const& s, String const& chars = fzS(typename String::value_type, " \r\n\t"), bool fromLeft = true, bool fromRight = true) {
+/// \private
+template<typename String, typename Chars>
+void trim_impl(String & s, Chars const& chars, bool fromLeft, bool fromRight) {
 	size_t const first = fromLeft ? s.find_first_not_of(chars) : 0;
 	if (first == String::npos) {
-		return String();
+		s = String();
+		return;
 	}
 
 	size_t const last = fromRight ? s.find_last_not_of(chars) : s.size();
 	if (last == String::npos) {
-		return String();
+		s = String();
+		return;
 	}
-	return s.substr(first, last - first + 1);
+
+	// Invariant: If first exists, then last >= first
+	s = s.substr(first, last - first + 1);
 }
 
-template<typename String>
-String ltrimmed(String const& s, String const& chars = fzS(typename String::value_type, " \r\n\t")) {
-	return trimmed(s, chars, true, false);
+/// \brief Return passed string with all leading and trailing whitespace removed
+inline std::string FZ_PUBLIC_SYMBOL trimmed(std::string_view s, std::string_view const& chars = " \r\n\t", bool fromLeft = true, bool fromRight = true)
+{
+	trim_impl(s, chars, fromLeft, fromRight);
+	return std::string(s);
 }
 
-template<typename String>
-String rtrimmed(String const& s, String const& chars = fzS(typename String::value_type, " \r\n\t")) {
-	return trimmed(s, chars, false, true);
+inline std::wstring FZ_PUBLIC_SYMBOL trimmed(std::wstring_view s, std::wstring_view const& chars = L" \r\n\t", bool fromLeft = true, bool fromRight = true)
+{
+	trim_impl(s, chars, fromLeft, fromRight);
+	return std::wstring(s);
 }
+
+inline std::string FZ_PUBLIC_SYMBOL ltrimmed(std::string_view s, std::string_view const& chars = " \r\n\t")
+{
+	trim_impl(s, chars, true, false);
+	return std::string(s);
+}
+
+inline std::wstring FZ_PUBLIC_SYMBOL ltrimmed(std::wstring_view s, std::wstring_view const& chars = L" \r\n\t")
+{
+	trim_impl(s, chars, true, false);
+	return std::wstring(s);
+}
+
+inline std::string FZ_PUBLIC_SYMBOL rtrimmed(std::string_view s, std::string_view const& chars = " \r\n\t")
+{
+	trim_impl(s, chars, false, true);
+	return std::string(s);
+}
+
+inline std::wstring FZ_PUBLIC_SYMBOL rtrimmed(std::wstring_view s, std::wstring_view const& chars = L" \r\n\t")
+{
+	trim_impl(s, chars, false, true);
+	return std::wstring(s);
+}
+
 
 /// \brief Remove all leading and trailing whitespace from string
-template<typename String>
-void trim(String & s, String const& chars = fzS(typename String::value_type, " \r\n\t")) {
-	s = trimmed(s, chars);
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, char>, int> = 0>
+inline void trim(String & s, std::string_view const& chars = " \r\n\t", bool fromLeft = true, bool fromRight = true)
+{
+	trim_impl(s, chars, fromLeft, fromRight);
 }
 
-template<typename String>
-void ltrim(String & s, String const& chars = fzS(typename String::value_type, " \r\n\t")) {
-	s = trimmed(s, chars, true, false);
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, wchar_t>, int> = 0>
+inline void trim(String & s, std::wstring_view const& chars = L" \r\n\t", bool fromLeft = true, bool fromRight = true)
+{
+	trim_impl(s, chars, fromLeft, fromRight);
 }
 
-template<typename String>
-void rtrim(String & s, String const& chars = fzS(typename String::value_type, " \r\n\t")) {
-	s = trimmed(s, chars, false, true);
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, char>, int> = 0>
+inline void ltrim(String& s, std::string_view const& chars = " \r\n\t")
+{
+	trim_impl(s, chars, true, false);
+}
+
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, wchar_t>, int> = 0>
+inline void ltrim(String& s, std::wstring_view  const& chars = L" \r\n\t")
+{
+	trim_impl(s, chars, true, false);
+}
+
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, char>, int> = 0>
+inline void rtrim(String& s, std::string_view const& chars = " \r\n\t")
+{
+	trim_impl(s, chars, false, true);
+}
+
+template<typename String, typename std::enable_if_t<std::is_same_v<typename String::value_type, wchar_t>, int> = 0>
+inline void rtrim(String & s, std::wstring_view const& chars = L" \r\n\t")
+{
+	trim_impl(s, chars, false, true);
 }
 
 /** \brief Tests whether the first string starts with the second string
@@ -403,7 +465,7 @@ bool starts_with(String const& s, String const& beginning)
 	if (beginning.size() > s.size()) {
 		return false;
 	}
-	if (insensitive_ascii) {
+	if constexpr (insensitive_ascii) {
 		return std::equal(beginning.begin(), beginning.end(), s.begin(), [](typename String::value_type const& a, typename String::value_type const& b) {
 			return tolower_ascii(a) == tolower_ascii(b);
 		});
@@ -424,7 +486,7 @@ bool ends_with(String const& s, String const& ending)
 		return false;
 	}
 
-	if (insensitive_ascii) {
+	if constexpr (insensitive_ascii) {
 		return std::equal(ending.rbegin(), ending.rend(), s.rbegin(), [](typename String::value_type const& a, typename String::value_type const& b) {
 			return tolower_ascii(a) == tolower_ascii(b);
 		});
