@@ -23,14 +23,32 @@ struct sockaddr;
 namespace fz {
 class thread_pool;
 
+/// The type of a socket event
 enum class socket_event_flag
 {
-	// This is a nonfatal condition. It
-	// means there are additional addresses to try.
+	/**
+	 * Sent if connection attempt has failed, but there are still
+	 * additional addresses to try.
+	 * Errors can be ignored for this type.
+	 */
 	connection_next,
 
+	/**
+	 * If no error is set, the connection has been established.
+	 * If an error is set, the connection could not be established.
+	 */
 	connection,
+
+	/**
+	 * If no error is set, data has become available.
+	 * If an error is set, the connection has failed.
+	 */
 	read,
+
+	/**
+	 * If no error is set, data can be written.
+	 * If an error is set, the connection has failed.
+	 */
 	write
 };
 
@@ -74,13 +92,18 @@ struct socket_event_type;
  *
  * If the error value is non-zero for the connection, read and write events,
  * the socket has failed and needs to be closed. Doing anything else with
- * failed sockets is undefined behavior. 
+ * failed sockets is undefined behavior.
  * Failure events can be received at any time.
  *
  * Read and write events are edge-triggered:
- * - After receiving a read event for a socket, it will not be sent again unless
- * a subsequent call to socket::read has returned EAGAIN.
- * - The same holds for the write event and socket::write
+ * - After receiving a read event for a socket, it will not be sent again
+ *   unless a subsequent call to socket_interface::read or
+ *   socket_interface::shutdown_read has returned EAGAIN.
+ * - The same holds for the write event and socket_interface::write and
+ *   socket_interface::shutdown
+ *
+ * It is a grave violation to call the read/write/shutdown functions
+ * again after they returned EAGAIN without first waiting for the event.
  */
 typedef simple_event<socket_event_type, socket_event_source*, socket_event_flag, int> socket_event;
 
@@ -107,8 +130,7 @@ void FZ_PUBLIC_SYMBOL remove_socket_events(event_handler * handler, socket_event
  *
  * This function is called by socket::set_event_handler().
  *
- * \example Possible use-cases: Handoff after proxy handshakes, or handoff to TLS classes in
-			case of STARTTLS mechanism
+ * Example use-cases: Handoff after proxy handshakes, or handoff to TLS classes in case of STARTTLS mechanism
  */
 void FZ_PUBLIC_SYMBOL change_socket_event_handler(event_handler * old_handler, event_handler * new_handler, socket_event_source const* const source);
 
@@ -177,17 +199,17 @@ protected:
 	thread_pool & thread_pool_;
 	event_handler* evt_handler_;
 
-	socket_t fd_{-1};
-
 	socket_thread* socket_thread_{};
+
+	socket_event_source * const ev_source_{};
+
+	socket_t fd_{-1};
 
 	unsigned int port_{};
 
 	int family_;
 
 	int buffer_sizes_[2];
-
-	socket_event_source * const ev_source_{};
 };
 
 class socket;
@@ -201,6 +223,7 @@ enum class listen_socket_state
 	listening,
 };
 
+/// Lightweight holder for socket descriptors
 class FZ_PUBLIC_SYMBOL socket_descriptor final
 {
 public:
@@ -230,7 +253,7 @@ private:
 };
 
 /**
- * /brief Simple Listen socket
+ * \brief Simple Listen socket
  *
  * When a client connects, a socket event with the connection flag is send.
  *
@@ -250,7 +273,7 @@ public:
 	/**
 	 * \brief Starts listening
 	 *
-	 * If no port is given, let the operating system devcide on a port. Can use local_port to query it afterwards.
+	 * If no port is given, let the operating system decide on a port. Can use local_port to query it afterwards.
 	 *
 	 * The address type, if not fz::address_type::unknown, must may the type of the address passed to bind()
 	 */
@@ -280,7 +303,7 @@ private:
 
 
 /// State transitions are monotonically increasing
-enum class socket_state
+enum class socket_state : unsigned char
 {
 	/// How the socket is initially
 	none,
@@ -310,7 +333,7 @@ enum class socket_state
 /**
  * \brief Interface for sockets
  *
- * Can be used for layers, see fz::socket for the expexted semantics.
+ * Can be used for layers, see fz::socket for the expected semantics.
  */
 class FZ_PUBLIC_SYMBOL socket_interface : public socket_event_source
 {
@@ -335,9 +358,14 @@ public:
 	 *
 	 * Only disallows further sends, does not affect reading from the
 	 * socket.
+	 *
+	 * Returns 0 on success, an error code otherwise.
+	 * If it returns EGAIN, shutdown is not yet complete. Call shutdown
+	 * again after the next write event.
 	 */
 	virtual int shutdown() = 0;
 
+	/// \see socket_layer::shutdown_read
 	virtual int shutdown_read() = 0;
 
 protected:
@@ -489,10 +517,10 @@ private:
 	friend class listen_socket;
 	native_string host_;
 
-	socket_state state_{};
+	duration keepalive_interval_;
 
 	int flags_{};
-	duration keepalive_interval_;
+	socket_state state_{};
 };
 
 /**
@@ -507,6 +535,8 @@ private:
  *
  * For safe closing of a layer hierarchy, both the write and read side
  * should be shut down first, otherwise pending data might get discarded.
+ * The shutdown and shutdown_read functions may return EAGAIN, in which
+ * case they must be called again after the next write/read event.
  */
 class FZ_PUBLIC_SYMBOL socket_layer : public socket_interface
 {
@@ -521,16 +551,16 @@ public:
 	virtual void set_event_handler(event_handler* handler) override;
 
 	/**
-	 * Can be overriden to return something different, e.g. a proxy layer
+	 * Can be overridden to return something different, e.g. a proxy layer
 	 * would return the hostname of the peer connected to through the proxy,
-	 * whereas the next layer would return the address of the proxy istself.
+	 * whereas the next layer would return the address of the proxy itself.
 	 */
 	virtual native_string peer_host() const override { return next_layer_.peer_host(); }
 
 	/**
-	 * Can be overriden to return something different, e.g. a proxy layer
+	 * Can be overridden to return something different, e.g. a proxy layer
 	 * would return the post of the peer connected to through the proxy,
-	 * whereas the next layer would return the port of the proxy istself.
+	 * whereas the next layer would return the port of the proxy itself.
 	 */
 	virtual int peer_port(int& error) const override { return next_layer_.peer_port(error); }
 
@@ -545,7 +575,7 @@ public:
 	 *
 	 * \return 0 on success
 	 * \return EAGAIN if the shutdown cannot be completed, wait for a read event and try again.
-	 * \return otherwise an error has occured.
+	 * \return otherwise an error has occurred.
 	 *
 	 * On an ordinary socket, this is a no-op. Some layers however may return an EOF before the
 	 * next lower layer has reached its own EOF, such as the EOF of the secure channel from
@@ -589,7 +619,7 @@ protected:
 /**
  * \brief Gets a symbolic name for socket errors.
  *
- * \example error_string(EAGAIN) == "EAGAIN"
+ * For example, <tt>error_string(EAGAIN) == "EAGAIN"</tt>
  *
  * \return name if the error code is known
  * \return number as string if the error code is not known

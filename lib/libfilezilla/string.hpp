@@ -50,7 +50,7 @@ native_string FZ_PUBLIC_SYMBOL to_native(std::string_view const& in);
  */
 native_string FZ_PUBLIC_SYMBOL to_native(std::wstring_view const& in);
 
-/// Avoid converting native_string to native_string_view and back to string_view
+/// Avoid converting native_string to native_string_view and back to native_string
 template<typename T, typename std::enable_if_t<std::is_same_v<native_string, typename std::decay_t<T>>, int> = 0>
 inline native_string to_native(T const& in) {
 	return in;
@@ -114,9 +114,9 @@ std::wstring FZ_PUBLIC_SYMBOL str_tolower_ascii(std::wstring_view const& s);
 std::string FZ_PUBLIC_SYMBOL str_toupper_ascii(std::string_view const& s);
 std::wstring FZ_PUBLIC_SYMBOL str_toupper_ascii(std::wstring_view const& s);
 
-/** \brief Comparator to be used for std::map for case-insentitive keys
+/** \brief Comparator to be used for std::map for case-insensitive keys
  *
- * Comparision is done locale-agnostic.
+ * Comparison is done locale-agnostic.
  * Useful for key-value pairs in protocols, e.g. HTTP headers.
  */
 struct FZ_PUBLIC_SYMBOL less_insensitive_ascii final
@@ -135,11 +135,18 @@ struct FZ_PUBLIC_SYMBOL less_insensitive_ascii final
  *
  * Equivalent to str_tolower_ascii(a).compare(str_tolower_ascii(b));
  */
-template<typename String>
-bool equal_insensitive_ascii(String const& a, String const& b)
+inline bool equal_insensitive_ascii(std::string_view a, std::string_view b)
 {
 	return std::equal(a.cbegin(), a.cend(), b.cbegin(), b.cend(),
-	    [](typename String::value_type const& a, typename String::value_type const& b) {
+	    [](auto const& a, auto const& b) {
+		    return tolower_ascii(a) == tolower_ascii(b);
+	    }
+	);
+}
+inline bool equal_insensitive_ascii(std::wstring_view a, std::wstring_view b)
+{
+	return std::equal(a.cbegin(), a.cend(), b.cbegin(), b.cend(),
+	    [](auto const& a, auto const& b) {
 		    return tolower_ascii(a) == tolower_ascii(b);
 	    }
 	);
@@ -150,9 +157,16 @@ bool equal_insensitive_ascii(String const& a, String const& b)
  * \return the converted string on success. On failure an empty string is returned.
  */
 std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::string_view const& in);
+inline std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::wstring_view const& in) { return std::wstring(in); }
 
-/// Returns identity, that way to_wstring can be called with native_string.
-inline std::wstring FZ_PUBLIC_SYMBOL to_wstring(std::wstring const& in) { return in; }
+/** \brief Returns identity, that way to_wstring can be called with native_string.
+ *
+ * This template prevents converting std::wstring to std::wstring_view and back to std::wstring
+ */
+template<typename T, typename std::enable_if_t<std::is_same_v<std::wstring, typename std::decay_t<T>>, int> = 0>
+inline std::wstring to_wstring(T const& in) {
+	return in;
+}
 
 /// Converts from arithmetic type to std::wstring
 template<typename Arg>
@@ -174,9 +188,17 @@ std::wstring FZ_PUBLIC_SYMBOL to_wstring_from_utf8(char const* s, size_t len);
  * \return the converted string on success. On failure an empty string is returned.
  */
 std::string FZ_PUBLIC_SYMBOL to_string(std::wstring_view const& in);
+inline std::string FZ_PUBLIC_SYMBOL to_string(std::string_view const& in) { return std::string(in); }
 
-/// Returns identity, that way to_string can be called with native_string.
-inline std::string FZ_PUBLIC_SYMBOL to_string(std::string const& in) { return in; }
+/** \brief Returns identity, that way to_wstring can be called with native_string.
+ *
+ * This template prevents converting std::wstring to std::wstring_view and back to std::wstring
+ */
+template<typename T, typename std::enable_if_t<std::is_same_v<std::string, typename std::decay_t<T>>, int> = 0>
+inline std::string to_string(T const& in) {
+	return in;
+}
+
 
 /// Converts from arithmetic type to std::string
 template<typename Arg>
@@ -304,30 +326,32 @@ inline auto FZ_PUBLIC_SYMBOL strtok_view(std::wstring_view const& tokens, wchar_
 template<typename T, typename String>
 T to_integral_impl(String const& s, T const errorval = T())
 {
-	T ret{};
-
-	auto it = s.cbegin();
-	if (it != s.cend() && (*it == '-' || *it == '+')) {
-		++it;
-	}
-
-	if (it == s.cend()) {
-		return errorval;
-	}
-
-	for (; it != s.cend(); ++it) {
-		auto const& c = *it;
-		if (c < '0' || c > '9') {
-			return errorval;
-		}
-		ret *= 10;
-		ret += c - '0';
-	}
-
-	if (!s.empty() && s.front() == '-') {
-		return ret *= static_cast<T>(-1);
+	if constexpr (std::is_enum_v<T>) {
+		return static_cast<T>(to_integral_impl<std::underlying_type_t<T>>(s, static_cast<std::underlying_type_t<T>>(errorval)));
 	}
 	else {
+		T ret{};
+		auto it = s.cbegin();
+		if (it != s.cend() && (*it == '-' || *it == '+')) {
+			++it;
+		}
+
+		if (it == s.cend()) {
+			return errorval;
+		}
+
+		for (; it != s.cend(); ++it) {
+			auto const& c = *it;
+			if (c < '0' || c > '9') {
+				return errorval;
+			}
+			ret *= 10;
+			ret += c - '0';
+		}
+
+		if (!s.empty() && s.front() == '-') {
+			ret *= static_cast<T>(-1);
+		}
 		return ret;
 	}
 }
@@ -457,7 +481,7 @@ inline void rtrim(String & s, std::wstring_view const& chars = L" \r\n\t")
 
 /** \brief Tests whether the first string starts with the second string
  *
- * \param insensitive_ascii If true, comparison is case-insensitive
+ * \tparam insensitive_ascii If true, comparison is case-insensitive
  */
 template<bool insensitive_ascii = false, typename String>
 bool starts_with(String const& s, String const& beginning)
@@ -477,7 +501,7 @@ bool starts_with(String const& s, String const& beginning)
 
 /** \brief Tests whether the first string ends with the second string
  *
- * \param insensitive_ascii If true, comparison is case-insensitive
+ * \tparam insensitive_ascii If true, comparison is case-insensitive
  */
 template<bool insensitive_ascii = false, typename String>
 bool ends_with(String const& s, String const& ending)

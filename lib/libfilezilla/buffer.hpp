@@ -13,7 +13,7 @@ namespace fz {
  * \brief The buffer class is a simple buffer where data can be appended at the end and consumed at the front.
  * Think of it as a deque with contiguous storage.
  *
- * This class is useful when buffering data for sending over the network, or for buffering data for further 
+ * This class is useful when buffering data for sending over the network, or for buffering data for further
  * piecemeal processing after having received it.
  *
  * In general, copying/moving data around is expensive and allocations are even more expensive. Using this
@@ -43,9 +43,9 @@ public:
 	/** \brief Returns a writable buffer guaranteed to be large enough for write_size bytes, call add when done.
 	 *
 	 * The returned pointer is pointing just after the data already stored in the buffer.
-
+	 *
 	 * Calling this function does not does not affect size().
-
+	 *
 	 * \sa append
 	 *
 	 * \par Example:
@@ -65,7 +65,7 @@ public:
 
 	/** \brief Removes consumed bytes from the beginning of the buffer.
 	 *
-	 * Undefined if consumed > size
+	 * Undefined if consumed > size()
 	 */
 	void consume(size_t consumed);
 
@@ -88,7 +88,10 @@ public:
 		return size_ != 0;
 	}
 
+	size_t capacity() const { return capacity_; }
 	void reserve(size_t capacity);
+
+	void resize(size_t size);
 
 	/// Gets element at offset i. Does not do bounds checking
 	unsigned char operator[](size_t i) const { return pos_[i]; }

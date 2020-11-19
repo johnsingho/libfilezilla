@@ -7,6 +7,8 @@
 #include <time.h>
 #include <string.h>
 
+#include <nettle/memops.h>
+
 #if defined(FZ_WINDOWS) && !defined(_MSC_VER)
 #include "libfilezilla/private/windows.hpp"
 #include <wincrypt.h>
@@ -22,6 +24,17 @@ void sleep(duration const& d)
 	timespec ts{};
 	ts.tv_sec = d.get_seconds();
 	ts.tv_nsec = (d.get_milliseconds() % 1000) * 1000000;
+	nanosleep(&ts, nullptr);
+#endif
+}
+
+void yield()
+{
+#ifdef FZ_WINDOWS
+	Sleep(static_cast<DWORD>(1)); // Nothing smaller on MSW?
+#else
+	timespec ts{};
+	ts.tv_nsec = 100000; // 0.1ms
 	nanosleep(&ts, nullptr);
 #endif
 }
@@ -134,6 +147,19 @@ uint64_t bitscan_reverse(uint64_t v)
 
 	return static_cast<uint64_t>(i);
 #endif
+}
+
+bool equal_consttime(std::basic_string_view<uint8_t> const& lhs, std::basic_string_view<uint8_t> const& rhs)
+{
+	if (lhs.size() != rhs.size()) {
+		return false;
+	}
+
+	if (lhs.empty()) {
+		return true;
+	}
+
+	return nettle_memeql_sec(lhs.data(), rhs.data(), lhs.size()) != 0;
 }
 
 }

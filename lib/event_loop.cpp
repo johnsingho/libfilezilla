@@ -4,7 +4,13 @@
 #include "libfilezilla/util.hpp"
 
 #include <algorithm>
-#include <cassert>
+
+#ifdef LFZ_EVENT_DEBUG
+#include <assert.h>
+#define event_assert(pred) assert((pred))
+#else
+#define event_assert(pred)
+#endif
 
 namespace fz {
 
@@ -33,6 +39,9 @@ event_loop::~event_loop()
 
 void event_loop::send_event(event_handler* handler, event_base* evt)
 {
+	event_assert(handler);
+	event_assert(evt);
+
 	{
 		scoped_lock lock(sync_);
 		if (!handler->removing_) {
@@ -81,7 +90,7 @@ void event_loop::remove_handler(event_handler* handler)
 		if (thread::own_id() != thread_id_) {
 			while (active_handler_ == handler) {
 				l.unlock();
-				sleep(duration::from_milliseconds(1));
+				yield();
 				l.lock();
 			}
 		}
@@ -155,9 +164,9 @@ bool event_loop::process_event(scoped_lock & l)
 	ev = pending_events_.front();
 	pending_events_.pop_front();
 
-	assert(ev.first);
-	assert(ev.second);
-	assert(!ev.first->removing_);
+	event_assert(ev.first);
+	event_assert(ev.second);
+	event_assert(!ev.first->removing_);
 
 	active_handler_ = ev.first;
 
@@ -255,7 +264,7 @@ bool event_loop::process_timers(scoped_lock & l, monotonic_clock & now)
 		}
 
 		// Call event handler
-		assert(!handler->removing_);
+		event_assert(!handler->removing_);
 
 		active_handler_ = handler;
 

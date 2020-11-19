@@ -790,8 +790,9 @@ bool tls_layer_impl::server_handshake(std::vector<uint8_t> const& session_to_res
 int tls_layer_impl::continue_handshake()
 {
 	logger_.log(logmsg::debug_verbose, L"tls_layer_impl::continue_handshake()");
-	assert(session_);
-	assert(state_ == socket_state::connecting);
+	if (!session_ || state_ != socket_state::connecting) {
+		return ENOTCONN;
+	}
 
 	int res = gnutls_handshake(session_);
 	while (res == GNUTLS_E_AGAIN || res == GNUTLS_E_INTERRUPTED) {
@@ -1077,10 +1078,15 @@ static std::string bin2hex(unsigned char const* in, size_t size)
 }
 
 
-bool tls_layer_impl::extract_cert(gnutls_x509_crt_t const& cert, x509_certificate& out)
+bool tls_layer_impl::extract_cert(gnutls_x509_crt_t const& cert, x509_certificate& out, bool last)
 {
 	datetime expiration_time(gnutls_x509_crt_get_expiration_time(cert), datetime::seconds);
 	datetime activation_time(gnutls_x509_crt_get_activation_time(cert), datetime::seconds);
+
+	if (!activation_time || !expiration_time || expiration_time < activation_time) {
+		logger_.log(logmsg::error, fztranslate("Could not extract validity period of certificate"));
+		return false;
+	}
 
 	// Get the serial number of the certificate
 	unsigned char buffer[40];
@@ -1171,7 +1177,8 @@ bool tls_layer_impl::extract_cert(gnutls_x509_crt_t const& cert, x509_certificat
 		fingerprint_sha1,
 		issuer,
 		subject,
-		std::move(alt_subject_names));
+		std::move(alt_subject_names),
+		last ? gnutls_x509_crt_check_issuer(cert, cert) : false);
 
 	return true;
 }
@@ -1210,26 +1217,33 @@ std::vector<x509_certificate::subject_name> tls_layer_impl::get_cert_subject_alt
 
 bool tls_layer_impl::certificate_is_blacklisted(cert_list_holder const& certs)
 {
+	for (size_t i = 0; i < certs.certs_size; ++i) {
+		if (certificate_is_blacklisted(certs.certs[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool tls_layer_impl::certificate_is_blacklisted(gnutls_x509_crt_t const& cert)
+{
 	static std::set<std::string, std::less<>> const bad_authority_key_ids = {
 		std::string("\xF4\x94\xBF\xDE\x50\xB6\xDB\x6B\x24\x3D\x9E\xF7\xBE\x3A\xAE\x36\xD7\xFB\x0E\x05", 20) // Nation-wide MITM in Kazakhstan
 	};
 
 	char buf[256];
 	unsigned int critical{};
-	for (size_t i = 0; i < certs.certs_size; ++i) {
-		auto const& cert = certs.certs[i];
-		size_t size = sizeof(buf);
-		int res = gnutls_x509_crt_get_authority_key_id(cert, buf, &size, &critical);
-		if (!res) {
-			auto it = bad_authority_key_ids.find(std::string_view(buf, size));
-			if (it != bad_authority_key_ids.cend()) {
-				return true;
-			}
+	size_t size = sizeof(buf);
+	int res = gnutls_x509_crt_get_authority_key_id(cert, buf, &size, &critical);
+	if (!res) {
+		auto it = bad_authority_key_ids.find(std::string_view(buf, size));
+		if (it != bad_authority_key_ids.cend()) {
+			return true;
 		}
 	}
+
 	return false;
 }
-
 
 int tls_layer_impl::get_algorithm_warnings() const
 {
@@ -1385,7 +1399,12 @@ void tls_layer_impl::log_verification_error(int status)
 	}
 #endif
 	if (status) {
-		logger_.log(logmsg::error, fztranslate("Received certificate chain could not be verified. Verification status is %d."), status);
+		if (status == GNUTLS_CERT_INVALID) {
+			logger_.log(logmsg::error, fztranslate("Received certificate chain could not be verified."));
+		}
+		else {
+			logger_.log(logmsg::error, fztranslate("Received certificate chain could not be verified. Verification status is %d."), status);
+		}
 	}
 
 }
@@ -1411,14 +1430,20 @@ int tls_layer_impl::verify_certificate()
 		return EINVAL;
 	}
 
-	datum_holder cert_der{};
-	int res = gnutls_x509_crt_export2(certs.certs[0], GNUTLS_X509_FMT_DER, &cert_der);
-	if (res != GNUTLS_E_SUCCESS) {
-		failure(res, true, L"gnutls_x509_crt_export2");
-		return ECONNABORTED;
+	if (certificate_is_blacklisted(certs)) {
+		logger_.log(logmsg::error, fztranslate("Man-in-the-Middle attack detected, aborting connection."));
+		failure(0, true);
+		return EINVAL;
 	}
 
 	if (!required_certificate_.empty()) {
+		datum_holder cert_der{};
+		int res = gnutls_x509_crt_export2(certs.certs[0], GNUTLS_X509_FMT_DER, &cert_der);
+		if (res != GNUTLS_E_SUCCESS) {
+			failure(res, true, L"gnutls_x509_crt_export2");
+			return ECONNABORTED;
+		}
+
 		if (required_certificate_.size() != cert_der.size ||
 			memcmp(required_certificate_.data(), cert_der.data, cert_der.size))
 		{
@@ -1545,7 +1570,7 @@ int tls_layer_impl::verify_certificate()
 		certificates.reserve(certs.certs_size);
 		for (unsigned int i = 0; i < certs.certs_size; ++i) {
 			x509_certificate cert;
-			if (extract_cert(certs.certs[i], cert)) {
+			if (extract_cert(certs.certs[i], cert, i + 1 == certs.certs_size)) {
 				certificates.push_back(cert);
 			}
 			else {
@@ -1554,10 +1579,34 @@ int tls_layer_impl::verify_certificate()
 			}
 		}
 
-		if (certificate_is_blacklisted(certs)) {
-			logger_.log(logmsg::error, fztranslate("Man-in-the-Middle attack detected, aborting connection."));
-			failure(0, true);
-			return EINVAL;
+		// Lengthen incomplete chains to the root using the trust store.
+		if (!certificates.empty() && !certificates.back().self_signed() && system_trust_store_) {
+			auto lease = system_trust_store_->impl_->lease();
+			auto cred = std::get<0>(lease);
+			if (cred) {
+				gnutls_x509_crt_t cert = certs.certs[certs.certs_size - 1];
+				while (!certificates.back().self_signed()) {
+					gnutls_x509_crt_t issuer{};
+					if (gnutls_certificate_get_issuer(cred, cert, &issuer, 0) || !issuer) {
+						break;
+					}
+
+					// Why is this cert even in the trust store? Antivirus MITM?
+					if (certificate_is_blacklisted(issuer)) {
+						logger_.log(logmsg::error, fztranslate("Man-in-the-Middle attack detected, aborting connection."));
+						failure(0, true);
+						return EINVAL;
+					}
+
+					x509_certificate out;
+					if (!extract_cert(issuer, out, true)) {
+						failure(0, true);
+						return ECONNABORTED;
+					}
+					certificates.push_back(out);
+					cert = issuer;
+				}
+			}
 		}
 
 		int const algorithmWarnings = get_algorithm_warnings();
@@ -1609,10 +1658,32 @@ std::string tls_layer_impl::get_key_exchange() const
 {
 	std::string ret;
 
-	char const* s = gnutls_kx_get_name(gnutls_kx_get(session_));
-	if (s && *s) {
-		ret = s;
+	char const* s{};
+	gnutls_kx_algorithm_t alg = gnutls_kx_get(session_);
+	bool const dh = (alg == GNUTLS_KX_DHE_RSA || alg == GNUTLS_KX_DHE_DSS);
+	bool const ecdh = (alg == GNUTLS_KX_ECDHE_RSA || alg == GNUTLS_KX_ECDHE_ECDSA);
+	if (dh || ecdh) {
+		char const* const signature_name = gnutls_sign_get_name(static_cast<gnutls_sign_algorithm_t>(gnutls_sign_algorithm_get(session_)));
+		ret = (ecdh ? "ECDHE" : "DHE");
+#if GNUTLS_VERSION_NUMBER >= 0x030600
+		s = gnutls_group_get_name(gnutls_group_get(session_));
+		if (s && *s) {
+			ret += "-";
+			ret += s;
+		}
+#endif
+		if (signature_name && *signature_name) {
+			ret += "-";
+			ret += signature_name;
+		}
 	}
+	else {
+		s = gnutls_kx_get_name(alg);
+		if (s && *s) {
+			ret = s;
+		}
+	}
+
 
 	if (ret.empty()) {
 		ret = to_utf8(fztranslate("unknown"));

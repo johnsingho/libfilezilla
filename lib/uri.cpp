@@ -5,12 +5,12 @@
 namespace fz {
 
 namespace uri_chars {
-std::string const alpha{ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" };
-std::string const digit{ "01234567890" };
-std::string const scheme{ alpha + digit + "+-." };
+constexpr std::string_view alpha{ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" };
+constexpr std::string_view digit{ "01234567890" };
+constexpr std::string_view scheme{ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-." };
 }
 
-uri::uri(std::string const& in)
+uri::uri(std::string_view const& in)
 {
 	if (!parse(in)) {
 		clear();
@@ -22,7 +22,7 @@ void uri::clear()
 	*this = uri();
 }
 
-bool uri::parse(std::string in)
+bool uri::parse(std::string_view in)
 {
 	// Look for fragment
 	size_t pos = in.find('#');
@@ -39,7 +39,7 @@ bool uri::parse(std::string in)
 	}
 
 	// Do we have a scheme?
-	if (uri_chars::alpha.find(in[0]) != std::string::npos) {
+	if (!in.empty() && uri_chars::alpha.find(in[0]) != std::string::npos) {
 		size_t scheme_delim = in.find_first_not_of(uri_chars::scheme, 1);
 		if (scheme_delim != std::string::npos && in[scheme_delim] == ':') {
 			scheme_ = in.substr(0, scheme_delim);
@@ -48,24 +48,24 @@ bool uri::parse(std::string in)
 	}
 
 	// Do we have authority?
-	if (in[0] == '/' && in[1] == '/') {
+	if (in.size() >= 2 && in[0] == '/' && in[1] == '/') {
 		size_t auth_delim = in.find('/', 2);
-		std::string authority;
+		std::string_view authority;
 		if (auth_delim != std::string::npos) {
 			authority = in.substr(2, auth_delim - 2);
 			in = in.substr(auth_delim);
 		}
 		else {
 			authority = in.substr(2);
-			in.clear();
+			in = std::string_view();
 		}
-		if (!parse_authority(std::move(authority))) {
+		if (!parse_authority(authority)) {
 			return false;
 		}
 	}
 
 	if (!in.empty()) {
-		path_ = percent_decode(in);
+		path_ = percent_decode_s(in);
 		if (path_.empty()) {
 			return false;
 		}
@@ -74,20 +74,20 @@ bool uri::parse(std::string in)
 	return true;
 }
 
-bool uri::parse_authority(std::string && authority)
+bool uri::parse_authority(std::string_view authority)
 {
 	// Do we have userinfo?
 	size_t pos = authority.find('@');
 	if (pos != std::string::npos) {
-		std::string userinfo = authority.substr(0, pos);
+		std::string_view userinfo = authority.substr(0, pos);
 		authority = authority.substr(pos + 1);
 		pos = userinfo.find(':');
 		if (pos != std::string::npos) { // Slight inaccuracy: Empty password isn't handled well
-			user_ = percent_decode(userinfo.substr(0, pos));
+			user_ = percent_decode_s(userinfo.substr(0, pos));
 			if (user_.empty() && pos != 0) {
 				return false;
 			}
-			pass_ = percent_decode(userinfo.substr(pos + 1));
+			pass_ = percent_decode_s(userinfo.substr(pos + 1));
 			if (pass_.empty() && pos + 1 != userinfo.size()) {
 				return false;
 			}
@@ -106,7 +106,7 @@ bool uri::parse_authority(std::string && authority)
 		}
 	}
 
-	if (authority[0] == '[') {
+	if (!authority.empty() && authority[0] == '[') {
 		if (authority.back() != ']') {
 			return false;
 		}
@@ -114,7 +114,7 @@ bool uri::parse_authority(std::string && authority)
 			return false;
 		}
 	}
-	host_ = percent_decode(authority);
+	host_ = percent_decode_s(authority);
 	if (host_.empty() && !authority.empty()) {
 		return false;
 	}
@@ -221,7 +221,13 @@ bool uri::empty() const
 }
 
 
-query_string::query_string(std::string const& raw)
+bool uri::operator==(uri const& arg) const
+{
+	return std::tie(scheme_, user_, pass_, host_, port_, path_, query_, fragment_) == std::tie(arg.scheme_, arg.user_, arg.pass_, arg.host_, arg.port_, arg.path_, arg.query_, arg.fragment_);
+}
+
+
+query_string::query_string(std::string_view const& raw)
 {
 	set(raw);
 }
@@ -240,24 +246,24 @@ query_string::query_string(std::initializer_list<std::pair<std::string, std::str
 	}
 }
 
-bool query_string::set(std::string const& raw)
+bool query_string::set(std::string_view const& raw)
 {
 	segments_.clear();
 
-	auto const tokens = fz::strtok_view(raw, "&");
+	auto const tokens = strtok_view(raw, "&");
 	for (auto const& token : tokens) {
 		size_t pos = token.find('=');
 		if (!pos) {
 			return false;
 		}
 
-		std::string key = fz::percent_decode(token.substr(0, pos));
+		std::string key = percent_decode_s(token.substr(0, pos));
 		if (key.empty()) {
 			return false;
 		}
 		std::string value;
 		if (pos != std::string::npos) {
-			value = fz::percent_decode(token.substr(pos + 1));
+			value = percent_decode_s(token.substr(pos + 1));
 			if (value.empty() && pos + 1 != token.size()) {
 				return false;
 			}
@@ -286,9 +292,9 @@ std::string query_string::to_string(bool encode_slashes) const
 	std::string ret;
 	if (!segments_.empty()) {
 		for (auto const& segment : segments_) {
-			ret += fz::percent_encode(segment.first, !encode_slashes);
+			ret += percent_encode(segment.first, !encode_slashes);
 			ret += '=';
-			ret += fz::percent_encode(segment.second, !encode_slashes);
+			ret += percent_encode(segment.second, !encode_slashes);
 			ret += '&';
 		}
 		ret.pop_back();

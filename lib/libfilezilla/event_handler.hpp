@@ -59,7 +59,7 @@ public:
 	explicit event_handler(event_loop& loop);
 	virtual ~event_handler();
 
-	event_handler(event_handler const&) = delete;
+	event_handler(event_handler const& h);
 	event_handler& operator=(event_handler const&) = delete;
 
 	/** \brief Deactivates handler, removes all pending events and stops all timers for this handler.
@@ -144,7 +144,7 @@ bool dispatch(event_base const& ev, F&& f)
 	bool const same = same_type<T>(ev);
 	if (same) {
 		T const* e = static_cast<T const*>(&ev);
-		apply(std::forward<F>(f), e->v_);
+		std::apply(std::forward<F>(f), e->v_);
 	}
 	return same;
 }

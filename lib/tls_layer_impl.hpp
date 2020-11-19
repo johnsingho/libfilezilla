@@ -82,6 +82,7 @@ private:
 
 	int verify_certificate();
 	bool certificate_is_blacklisted(cert_list_holder const& certificates);
+	bool certificate_is_blacklisted(gnutls_x509_crt_t const& cert);
 
 	void log_error(int code, std::wstring const& function, logmsg::type logLevel = logmsg::error);
 	void log_alert(logmsg::type logLevel);
@@ -100,7 +101,7 @@ private:
 
 	bool get_sorted_peer_certificates(gnutls_x509_crt_t *& certs, unsigned int & certs_size);
 
-	bool extract_cert(gnutls_x509_crt_t const& cert, x509_certificate& out);
+	bool extract_cert(gnutls_x509_crt_t const& cert, x509_certificate& out, bool last);
 	std::vector<x509_certificate::subject_name> get_cert_subject_alt_names(gnutls_x509_crt_t cert);
 
 	void log_verification_error(int status);
@@ -113,17 +114,16 @@ private:
 
 	tls_layer& tls_layer_;
 
-	socket_state state_{};
-
 	logger_interface & logger_;
-
-	bool initialized_{};
 
 	gnutls_session_t session_{};
 
 	std::vector<uint8_t> ticket_key_;
 
 	gnutls_certificate_credentials_t cert_credentials_{};
+
+	socket_state state_{};
+
 	bool handshake_successful_{};
 	bool sent_closure_alert_{};
 
@@ -141,9 +141,6 @@ private:
 
 	std::vector<uint8_t> required_certificate_;
 
-	bool socket_eof_{};
-	int socket_error_{}; // Set in the push and pull functions if reading/writing fails fatally
-
 	friend class tls_layer;
 	friend class tls_layerCallbacks;
 
@@ -152,6 +149,11 @@ private:
 	tls_system_trust_store* system_trust_store_{};
 
 	event_handler * verification_handler_{};
+
+	int socket_error_{}; // Set in the push and pull functions if reading/writing fails fatally
+	bool socket_eof_{};
+
+	bool initialized_{};
 };
 }
 

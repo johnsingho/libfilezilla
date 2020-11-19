@@ -22,7 +22,7 @@ class FZ_PUBLIC_SYMBOL uri final
 {
 public:
 	uri() = default;
-	explicit uri(std::string const& in);
+	explicit uri(std::string_view const& in);
 
 	void clear();
 
@@ -32,7 +32,7 @@ public:
 	 * Percent-decodes username, pass, host and path
 	 * Does not decode query and fragment.
 	 **/
-	bool parse(std::string in);
+	bool parse(std::string_view in);
 
 	/**
 	 * \brief Assembles components into string
@@ -49,8 +49,9 @@ public:
 	std::string get_authority(bool with_userinfo) const;
 
 	bool empty() const;
+	explicit operator bool() const { return !empty(); }
 
-	/// Often refered to as the protocol prefix, e.g. ftp://
+	/// Often referred to as the protocol prefix, e.g. ftp://
 	std::string scheme_;
 
 	/// Optional user part of the authority
@@ -93,8 +94,13 @@ public:
 	 * If the URI is not relative or from a different scheme, it is not changed.
 	 */
 	void resolve(uri const& base);
+
+	bool operator==(uri const& arg) const;
+
+	bool operator!=(uri const& arg) const { return !(*this == arg); }
+
 private:
-	bool FZ_PRIVATE_SYMBOL parse_authority(std::string && authority);
+	bool FZ_PRIVATE_SYMBOL parse_authority(std::string_view authority);
 };
 
 /**
@@ -106,22 +112,22 @@ class FZ_PUBLIC_SYMBOL query_string final
 {
 public:
 	explicit query_string() = default;
-	explicit query_string(std::string const& raw);
+	explicit query_string(std::string_view const& raw);
 	explicit query_string(std::pair<std::string, std::string> const& segment);
 	explicit query_string(std::initializer_list<std::pair<std::string, std::string>> const& segments);
-	bool set(std::string const& raw);
+	bool set(std::string_view const& raw);
 
 	std::string to_string(bool encode_slashes) const;
 
 	void remove(std::string const& key);
 	std::string& operator[](std::string const& key);
 
-	std::map<std::string, std::string, fz::less_insensitive_ascii> const& pairs() const { return segments_; }
+	std::map<std::string, std::string, less_insensitive_ascii> const& pairs() const { return segments_; }
 
 	bool empty() const { return segments_.empty(); }
 
 private:
-	std::map<std::string, std::string, fz::less_insensitive_ascii> segments_;
+	std::map<std::string, std::string, less_insensitive_ascii> segments_;
 };
 
 }

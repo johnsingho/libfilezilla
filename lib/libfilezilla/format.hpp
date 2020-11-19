@@ -7,7 +7,12 @@
 #include <cstdlib>
 #include <type_traits>
 
+#ifdef FORMAT_DEBUG
 #include <assert.h>
+#define format_assert(pred) assert((pred))
+#else
+#define format_assert(pred)
+#endif
 
 /** \file
 * \brief Header for the \ref fz::sprintf "sprintf" string formatting function
@@ -44,7 +49,7 @@ typename std::enable_if_t<std::is_integral<std::decay_t<Arg>>::value && !std::is
 
 	char lead{};
 
-	assert(!Unsigned || !std::is_signed<std::decay_t<Arg>>::value || arg >= 0);
+	format_assert(!Unsigned || !std::is_signed<std::decay_t<Arg>>::value || arg >= 0);
 
 	if (std::is_signed<std::decay_t<Arg>>::value && !(arg >= 0)) {
 		lead = '-';
@@ -118,7 +123,7 @@ typename std::enable_if_t<std::is_enum<std::decay_t<Arg>>::value, String> integr
 template<typename String, bool Unsigned, typename Arg>
 typename std::enable_if_t<!std::is_integral<std::decay_t<Arg>>::value && !std::is_enum<std::decay_t<Arg>>::value, String> integral_to_string(field const&, Arg &&)
 {
-	assert(0);
+	format_assert(0);
 	return String();
 }
 
@@ -128,24 +133,9 @@ struct has_toString : std::false_type {};
 template<typename String, class Arg>
 struct has_toString<String, Arg, std::void_t<decltype(toString<String>(std::declval<Arg>()))>> : std::true_type {};
 
-template<typename String, typename Arg>
-String arg_to_string(Arg&& arg)
-{
-	if constexpr (has_toString<String, Arg>::value) {
-		// Converts argument to string
-		// if toString(arg) is valid expression
-		return toString<String>(std::forward<Arg>(arg));
-	}
-	else {
-		// Otherwise assert
-		assert(0);
-		return String();
-	}
-}
-
 // Converts integral type to hex string with desired string type
 template<typename String, bool Lowercase, typename Arg>
-String integral_to_hex_string(Arg && arg)
+String integral_to_hex_string(Arg && arg) noexcept
 {
 	if constexpr (std::is_enum_v<std::decay_t<Arg>>) {
 		// Special handling for enum, cast to underlying type
@@ -165,20 +155,20 @@ String integral_to_hex_string(Arg && arg)
 		return String(p, end);
 	}
 	else {
-		assert(0);
+		format_assert(0);
 		return String();
 	}
 }
 
 // Converts pointer to hex string
 template<typename String, typename Arg>
-String pointer_to_string(Arg&& arg)
+String pointer_to_string(Arg&& arg) noexcept
 {
 	if constexpr (std::is_pointer_v<std::decay_t<Arg>>) {
 		return String({'0', 'x'}) + integral_to_hex_string<String, true>(reinterpret_cast<uintptr_t>(arg));
 	}
 	else {
-		assert(0);
+		format_assert(0);
 		return String();
 	}
 }
@@ -190,7 +180,7 @@ String char_to_string(Arg&& arg)
 		return String({static_cast<typename String::value_type>(static_cast<unsigned char>(arg))});
 	}
 	else {
-		assert(0);
+		format_assert(0);
 		return String();
 	}
 }
@@ -214,7 +204,18 @@ String format_arg(field const& f, Arg&& arg)
 {
 	String ret;
 	if (f.type == 's') {
-		ret = arg_to_string<String>(std::forward<Arg>(arg));
+		if constexpr (std::is_same_v<String, std::decay_t<Arg>>) {
+			ret = arg;
+		}
+		else if constexpr (has_toString<String, Arg>::value) {
+			// Converts argument to string
+			// if toString(arg) is valid expression
+			ret = toString<String>(std::forward<Arg>(arg));
+		}
+		else {
+			// Otherwise assert
+			format_assert(0);
+		}
 		pad_arg(ret, f);
 	}
 	else if (f.type == 'd' || f.type == 'i') {
@@ -239,7 +240,7 @@ String format_arg(field const& f, Arg&& arg)
 		ret = char_to_string<String>(std::forward<Arg>(arg));
 	}
 	else {
-		assert(0);
+		format_assert(0);
 	}
 	return ret;
 }
@@ -271,7 +272,7 @@ field get_field(InString const& fmt, typename InString::size_type & pos, size_t&
 {
 	field f;
 	if (++pos >= fmt.size()) {
-		assert(0);
+		format_assert(0);
 		return f;
 	}
 
@@ -302,7 +303,7 @@ parse_start:
 			break;
 		}
 		if (++pos >= fmt.size()) {
-			assert(0);
+			format_assert(0);
 			return f;
 		}
 	}
@@ -313,12 +314,12 @@ parse_start:
 		f.width *= 10;
 		f.width += fmt[pos] - '0';
 		if (++pos >= fmt.size()) {
-			assert(0);
+			format_assert(0);
 			return f;
 		}
 	}
 	if (f.width > 10000) {
-		assert(0);
+		format_assert(0);
 		f.width = 10000;
 	}
 
@@ -326,7 +327,7 @@ parse_start:
 		// Positional argument, start over
 		arg_n = f.width - 1;
 		if (++pos >= fmt.size()) {
-			assert(0);
+			format_assert(0);
 			return f;
 		}
 		goto parse_start;
@@ -337,7 +338,7 @@ parse_start:
 		auto c = fmt[pos];
 		if (c == 'h' || c == 'l' || c == 'L' || c == 'j' || c == 'z' || c == 't') {
 			if (++pos >= fmt.size()) {
-				assert(0);
+				format_assert(0);
 				return f;
 			}
 		}
@@ -361,12 +362,12 @@ OutString do_sprintf(InString const& fmt, Args&&... args)
 	size_t arg_n{};
 	while ((pos = fmt.find('%', start)) != InString::npos) {
 
-		// Copy segment preceeding the %
+		// Copy segment preceding the %
 		ret += fmt.substr(start, pos - start);
 
 		field f = detail::get_field(fmt, pos, arg_n, ret);
 		if (f) {
-			assert(arg_n < sizeof...(args));
+			format_assert(arg_n < sizeof...(args));
 			ret += detail::extract_arg<OutString>(f, arg_n++, std::forward<Args>(args)...);
 		}
 

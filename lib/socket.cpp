@@ -32,6 +32,9 @@
   #if HAVE_EVENTFD
 	#include <sys/eventfd.h>
   #endif
+  #if HAVE_TCP_INFO
+	#include <atomic>
+  #endif
 #endif
 
 #include <assert.h>
@@ -65,6 +68,26 @@ union sockaddr_u
 	sockaddr_in in4;
 	sockaddr_in6 in6;
 };
+
+#if HAVE_TCP_INFO
+// Attempting to set a high SND_RCVBUF can actually result in a smaller
+// TCP receive window scale factor.
+// Through TCP_INFO it is possible to detect this, and if it is the case,
+// avoid setting TCP_RCVBUF
+std::atomic<int> unmodified_rcv_wscale{};
+std::atomic<int> modified_rcv_wscale{};
+
+int get_rcv_wscale(int fd) {
+	tcp_info i{};
+	socklen_t len = sizeof(tcp_info);
+	int res = getsockopt(fd, IPPROTO_TCP, TCP_INFO, &i, &len);
+	if (res) {
+		return 0;
+	}
+	return i.tcpi_rcv_wscale;
+}
+
+#endif
 }
 
 void remove_socket_events(event_handler * handler, socket_event_source const* const source)
@@ -268,6 +291,8 @@ int do_set_flags(socket::socket_t fd, int flags, int flags_mask, duration const&
 		if (res != 0) {
 			return last_socket_error();
 		}
+#else
+		(void)keepalive_interval;
 #endif
 #endif
 	}
@@ -278,14 +303,21 @@ int do_set_flags(socket::socket_t fd, int flags, int flags_mask, duration const&
 int do_set_buffer_sizes(socket::socket_t fd, int size_read, int size_write)
 {
 	int ret = 0;
-	if (size_read != -1) {
-		int res = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&size_read, sizeof(size_read));
-		if (res != 0) {
-			ret = last_socket_error();
+	if (size_read >= 0) {
+#if HAVE_TCP_INFO
+		// Check if setting the buffer size shrinks the window scale factor
+		int const mws = modified_rcv_wscale;
+		if (!mws || mws >= unmodified_rcv_wscale)
+#endif
+		{
+			int res = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&size_read, sizeof(size_read));
+			if (res != 0) {
+				ret = last_socket_error();
+			}
 		}
 	}
 
-	if (size_write != -1) {
+	if (size_write >= 0) {
 		int res = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char*)&size_write, sizeof(size_write));
 		if (res != 0) {
 			ret = last_socket_error();
@@ -619,6 +651,15 @@ protected:
 		}
 		else {
 			static_cast<socket*>(socket_)->state_ = socket_state::connected;
+
+#if HAVE_TCP_INFO
+			if (socket_->buffer_sizes_[0] == -1 && !unmodified_rcv_wscale) {
+				unmodified_rcv_wscale = get_rcv_wscale(socket_->fd_);
+			}
+			else if (socket_->buffer_sizes_[0] != -1 && !modified_rcv_wscale) {
+				modified_rcv_wscale = get_rcv_wscale(socket_->fd_);
+			}
+#endif
 
 			if (socket_->evt_handler_) {
 				socket_->evt_handler_->send_event<socket_event>(socket_->ev_source_, socket_event_flag::connection, 0);
@@ -1095,6 +1136,11 @@ protected:
 	std::string port_;
 	std::string bind_;
 
+	mutex mutex_;
+	condition condition_;
+
+	async_task thread_;
+
 #ifdef FZ_WINDOWS
 	// We wait on this using WSAWaitForMultipleEvents
 	WSAEVENT sync_event_{WSA_INVALID_EVENT};
@@ -1105,11 +1151,6 @@ protected:
 	int pipe_[2]{-1, -1};
 #endif
 
-	mutex mutex_;
-	condition condition_;
-
-	bool quit_{};
-
 	// The socket events we are waiting for
 	int waiting_{};
 
@@ -1117,10 +1158,10 @@ protected:
 	int triggered_{};
 	int triggered_errors_[WAIT_EVENTCOUNT];
 
+	bool quit_{};
+
 	// Thread waits for instructions
 	bool threadwait_{};
-
-	async_task thread_;
 };
 
 socket_base::socket_base(thread_pool& pool, event_handler* evt_handler, socket_event_source* ev_source)
@@ -1338,7 +1379,19 @@ int socket_base::set_buffer_sizes(int size_receive, int size_send)
 
 	scoped_lock l(socket_thread_->mutex_);
 
-	buffer_sizes_[0] = size_receive;
+#if HAVE_TCP_INFO
+	// Explicitly ignore setting buffer size until after the unmodified window scale factor is known.
+	if (unmodified_rcv_wscale)
+#endif
+	{
+		if (size_receive < 0) {
+			// Remember if we ever changd it
+			buffer_sizes_[0] = (buffer_sizes_[0] == -1) ? -1 : -2;
+		}
+		else {
+			buffer_sizes_[0] = size_receive;
+		}
+	}
 	buffer_sizes_[1] = size_send;
 
 	if (fd_ == -1) {
@@ -1676,8 +1729,8 @@ int socket::write(void const* buffer, unsigned int size, int& error)
 
 #if !defined(SO_NOSIGPIPE) && !defined(FZ_WINDOWS)
 	// Some systems have neither. Need to block signal
-	sigaction old_action;
-	sigaction action = {};
+	struct sigaction old_action;
+	struct sigaction action = {};
 	action.sa_handler = SIG_IGN;
 	int signal_set = sigaction(SIGPIPE, &action, &old_action);
 #endif

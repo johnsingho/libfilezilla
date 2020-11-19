@@ -85,7 +85,7 @@ native_string escape_argument(native_string const& arg)
 
 	// Treat newlines as whitespace just to be sure, even if MSDN doesn't mention it
 	if (arg.find_first_of(fzT(" \"\t\r\n\v")) != native_string::npos) {
-		// Quite horrible, as per MSDN: 
+		// Quite horrible, as per MSDN:
 		// Backslashes are interpreted literally, unless they immediately precede a double quotation mark.
 		// If an even number of backslashes is followed by a double quotation mark, one backslash is placed in the argv array for every pair of backslashes, and the double quotation mark is interpreted as a string delimiter.
 		// If an odd number of backslashes is followed by a double quotation mark, one backslash is placed in the argv array for every pair of backslashes, and the double quotation mark is "escaped" by the remaining backslash, causing a literal double quotation mark (") to be placed in argv.
@@ -237,6 +237,8 @@ public:
 		return true;
 	}
 
+	HANDLE handle() const { return process_; }
+
 private:
 	HANDLE process_{INVALID_HANDLE_VALUE};
 
@@ -250,6 +252,7 @@ private:
 #include "libfilezilla/glue/unix.hpp"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <string.h>
@@ -257,6 +260,16 @@ private:
 
 #include <memory>
 #include <vector>
+
+#if FZ_MAC
+#include "libfilezilla/local_filesys.hpp"
+
+#include <CoreFoundation/CFArray.h>
+#include <CoreFoundation/CFURL.h>
+#include <CoreFoundation/CFBundle.h>
+
+#include <ApplicationServices/ApplicationServices.h>
+#endif
 
 namespace fz {
 
@@ -282,12 +295,12 @@ public:
 	pipe(pipe const&) = delete;
 	pipe& operator=(pipe const&) = delete;
 
-	bool create()
+	bool create(bool require_atomic_creation = false)
 	{
 		reset();
 
 		int fds[2];
-		if (!create_pipe(fds)) {
+		if (!create_pipe(fds, require_atomic_creation)) {
 			return false;
 		}
 
@@ -313,8 +326,7 @@ public:
 
 void make_arg(native_string const& arg, std::vector<std::unique_ptr<native_string::value_type[]>> & argList)
 {
-	std::unique_ptr<char[]> ret;
-	ret.reset(new char[arg.size() + 1]);
+	auto ret = std::make_unique<char[]>(arg.size() + 1);
 	memcpy(ret.get(), arg.c_str(), arg.size() + 1);
 	argList.push_back(std::move(ret));
 }
@@ -327,7 +339,7 @@ void get_argv(native_string const& cmd, std::vector<native_string>::const_iterat
 		make_arg(*it, argList);
 	}
 
-	argV.reset(new char *[argList.size() + 1]);
+	argV = std::make_unique<char*[]>(argList.size() + 1);
 	char ** v = argV.get();
 	for (auto const& a : argList) {
 		*(v++) = a.get();
@@ -356,7 +368,7 @@ public:
 			err_.create();
 	}
 
-	bool spawn(native_string const& cmd, std::vector<native_string>::const_iterator const& begin, std::vector<native_string>::const_iterator const& end)
+	bool spawn(native_string const& cmd, std::vector<native_string>::const_iterator const& begin, std::vector<native_string>::const_iterator const& end, std::vector<int> const& extra_fds = std::vector<int>())
 	{
 		if (pid_ != -1) {
 			return false;
@@ -382,12 +394,24 @@ public:
 			reset_fd(out_.read_);
 			reset_fd(err_.read_);
 
-			// Redirect to pipe
+			// Redirect to pipe. The redirected descriptors don't have
+			// FD_CLOEXEC set.
 			if (dup2(in_.read_, STDIN_FILENO) == -1 ||
 				dup2(out_.write_, STDOUT_FILENO) == -1 ||
 				dup2(err_.write_, STDERR_FILENO) == -1)
 			{
 				_exit(-1);
+			}
+
+			// Clear FD_CLOEXEC on extra descriptors
+			for (int fd : extra_fds) {
+				int flags = fcntl(fd, F_GETFD);
+				if (flags == -1) {
+					_exit(1);
+				}
+				if (fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) != 0) {
+					_exit(1);
+				}
 			}
 
 			// Execute process
@@ -481,6 +505,13 @@ bool process::spawn(native_string const& cmd, std::vector<native_string> const& 
 	return impl_ ? impl_->spawn(cmd, args.cbegin(), args.cend()) : false;
 }
 
+#ifndef FZ_WINDOWS
+bool process::spawn(native_string const& cmd, std::vector<native_string> const& args, std::vector<int> const& extra_fds)
+{
+	return impl_ ? impl_->spawn(cmd, args.cbegin(), args.cend(), extra_fds) : false;
+}
+#endif
+
 bool process::spawn(std::vector<native_string> const& command_with_args)
 {
 	if (command_with_args.empty()) {
@@ -507,9 +538,157 @@ bool process::write(char const* buffer, unsigned int len)
 	return impl_ ? impl_->write(buffer, len) : false;
 }
 
+#if FZ_WINDOWS
+HANDLE process::handle() const
+{
+	return impl_ ? impl_->handle() : INVALID_HANDLE_VALUE;
+}
+#endif
+
+#if FZ_MAC
+namespace {
+template<typename T>
+class cfref final
+{
+public:
+	cfref() = default;
+	~cfref() {
+		if (ref_) {
+			CFRelease(ref_);
+		}
+	}
+
+	explicit cfref(T ref, bool fromCreate = true)
+		: ref_(ref)
+	{
+		if (ref_ && !fromCreate) {
+			CFRetain(ref_);
+		}
+	}
+
+	cfref(cfref const& op)
+		: ref_(op.ref)
+	{
+		if (ref_) {
+			CFRetain(ref_);
+		}
+	}
+
+	cfref& operator=(cfref const& op)
+	{
+		if (this != &op) {
+			if (ref_) {
+				CFRelease(ref_);
+			}
+			ref_ = op.ref_;
+			if (ref_) {
+				CFRetain(ref_);
+			}
+		}
+
+		return *this;
+
+	}
+
+	explicit operator bool() const { return ref_ != nullptr; }
+
+	operator T& () { return ref_; }
+	operator T const& () const { return ref_; }
+
+private:
+	T ref_{};
+};
+
+typedef cfref<CFStringRef> cfsr;
+typedef cfref<CFURLRef> cfurl;
+typedef cfref<CFBundleRef> cfbundle;
+typedef cfref<CFMutableArrayRef> cfma;
+
+cfsr cfsr_view(std::string_view const& v)
+{
+	return cfsr(CFStringCreateWithBytesNoCopy(nullptr, reinterpret_cast<uint8_t const*>(v.data()), v.size(), kCFStringEncodingUTF8, false, kCFAllocatorNull), true);
+}
+
+int try_launch_bundle(std::vector<std::string> const& cmd_with_args)
+{
+	std::string_view cmd(cmd_with_args[0]);
+	if (!cmd.empty() && cmd.back() == '/') {
+		cmd = cmd.substr(0, cmd.size() - 1);
+	}
+	if (!ends_with(cmd, std::string_view(".app"))) {
+		return -1;
+	}
+
+	if (local_filesys::get_file_type(cmd_with_args[0], true) != local_filesys::dir) {
+		return -1;
+	}
+
+	// Treat it as a bundle
+
+
+	cfurl bundle_url(CFURLCreateWithFileSystemPath(nullptr, cfsr_view(cmd), kCFURLPOSIXPathStyle, true));
+	if (!bundle_url) {
+		return 0;
+	}
+
+	cfbundle bundle(CFBundleCreate(nullptr, bundle_url));
+	if (!bundle) {
+		return 0;
+	}
+
+	// Require the bundle to be an application
+	uint32_t type, creator;
+	CFBundleGetPackageInfo(bundle, &type, &creator);
+	if (type != 'APPL') {
+		return 0;
+	}
+
+	cfma args(CFArrayCreateMutable(nullptr, 0, &kCFTypeArrayCallBacks));
+	if (!args) {
+		return 0;
+	}
+
+	for (size_t i = 1; i < cmd_with_args.size(); ++i) {
+		cfurl arg_url;
+
+		auto const& arg = cmd_with_args[i];
+
+		if (!arg.empty() && arg.front() == '/') {
+			auto t = local_filesys::get_file_type(cmd_with_args[i], true);
+			if (t != local_filesys::unknown) {
+				arg_url = cfurl(CFURLCreateWithFileSystemPath(nullptr, cfsr_view(arg), kCFURLPOSIXPathStyle, t == local_filesys::dir));
+				if (!arg_url) {
+					return 0;
+				}
+			}
+		}
+
+		if (!arg_url) {
+			arg_url = cfurl(CFURLCreateWithString(nullptr, cfsr_view(arg), nullptr));
+		}
+
+		if (!arg_url) {
+			return 0;
+		}
+		CFArrayAppendValue(args, arg_url);
+	}
+
+	LSLaunchURLSpec ls{};
+	ls.appURL = bundle_url;
+	ls.launchFlags = kLSLaunchDefaults;
+	ls.itemURLs = args;
+	if (LSOpenFromURLSpec(&ls, nullptr) != noErr) {
+		return 0;
+	}
+
+	return 1;
+}
+}
+#endif
+
 bool spawn_detached_process(std::vector<native_string> const& cmd_with_args)
 {
-	if (cmd_with_args.empty()) {
+	if (cmd_with_args.empty() || cmd_with_args[0].empty()) {
 		return false;
 	}
 
@@ -538,6 +717,14 @@ bool spawn_detached_process(std::vector<native_string> const& cmd_with_args)
 		return false;
 	}
 
+#if FZ_MAC
+	// Special handling for application bundles if passed a single file name
+	int res = try_launch_bundle(cmd_with_args);
+	if (res != -1) {
+		return res == 1;
+	}
+#endif
+
 	std::vector<std::unique_ptr<char[]>> argList;
 	std::unique_ptr<char *[]> argV;
 	auto begin = cmd_with_args.cbegin() + 1;
@@ -545,27 +732,66 @@ bool spawn_detached_process(std::vector<native_string> const& cmd_with_args)
 
 	pid_t const parent = getppid();
 	pid_t const ppgid = getpgid(parent);
+
+	// We're using a pipe created with O_CLOEXEC to signal failure from execv.
+	// Note that this flags must be set atomically, setting FD_CLOEXEC after creation
+	// leads to a deadlock if a different thread calls exec in-between.
+	// Unfortunately even in early 2020, macOS does not have pipe2.
+	pipe errpipe;
+	errpipe.create(true);
+
 	pid_t pid = fork();
 	if (!pid) {
+		reset_fd(errpipe.read_);
+
+		// We're the child
 		pid_t inner_pid = fork();
 		if (!inner_pid) {
 			// Change the process group ID of the new process so that terminating the outer process does not terminate the child
 			setpgid(0, ppgid);
 			execv(argV.get()[0], argV.get());
+
+			if (errpipe.write_ != -1) {
+				ssize_t w;
+				do {
+					w = ::write(errpipe.write_, "", 1);
+				} while (w == -1 && (errno == EAGAIN || errno == EINTR));
+			}
+
 			_exit(-1);
 		}
 		else {
 			_exit(0);
 		}
+
+		return false;
 	}
 	else {
+		reset_fd(errpipe.write_);
+
+		// We're the parent
 		int ret;
 		do {
 		} while ((ret = waitpid(pid, nullptr, 0)) == -1 && errno == EINTR);
 
-		return ret != -1;
+		if (ret == -1) {
+			return false;
+		}
+
+		if (errpipe.read_ != -1) {
+			ssize_t r;
+			char tmp;
+			do {
+				r = ::read(errpipe.read_, &tmp, 1);
+			} while (r == -1 && (errno == EAGAIN || errno == EINTR));
+			if (r == 1) {
+				// execv failed in the child.
+				return false;
+			}
+		}
+
+		return true;
 	}
-	return false;
 #endif
 }
 }

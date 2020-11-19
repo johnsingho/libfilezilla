@@ -1,8 +1,18 @@
-AC_INIT([libfilezilla],[0.18.0],[tim.kosse@filezilla-project.org],[],[https://lib.filezilla-project.org/])
-AC_CONFIG_HEADERS([lib/libfilezilla/private/config.hpp])
+﻿AC_INIT([libfilezilla],[0.25.0],[tim.kosse@filezilla-project.org],[],[https://lib.filezilla-project.org/])
+
+# Update the version information only immediately before a public release of your software
+# If the library source code has changed at all since the last update, then increment revision (‘c:r:a’ becomes ‘c:r+1:a’).
+# If any interfaces have been added, removed, or changed since the last update, increment current, and set revision to 0.
+# If any interfaces have been added since the last public release, then increment age.
+# If any interfaces have been removed or changed since the last public release, then set age to 0.
+# CURRENT:REVISION:AGE
+LIBRARY_VERSION=10:0:0
+
+
+AC_CONFIG_HEADERS([config/config.hpp])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR(config)
-AM_INIT_AUTOMAKE([dist-bzip2 no-dist-gzip subdir-objects])
+AM_INIT_AUTOMAKE([dist-bzip2 no-dist-gzip subdir-objects nostdinc])
 
 AC_CANONICAL_HOST
 
@@ -12,6 +22,7 @@ AC_PROG_INSTALL
 
 LT_INIT([win32-dll])
 LT_LANG([C++])
+AC_SUBST(LIBRARY_VERSION)
 
 AC_CACHE_SAVE
 
@@ -92,12 +103,24 @@ else
   windows=0
 fi
 
+# Check if we're on Mac
+if test "$host_vendor" = "apple"; then
+  mac=1
+else
+  mac=0
+fi
+
 if test "$windows" = "1"; then
   libdeps=-lws2_32
 else
   libdeps=-lpthread
   CHECK_ICONV([libdeps="$libdeps -liconv"])
 fi
+
+if test "$windows" = "0" && test "$mac" = "0"; then
+  CHECK_TCP_INFO
+fi
+
 
 AC_SUBST([libdeps])
 
@@ -122,15 +145,15 @@ fi
 # Nettle
 # ------
 
-PKG_CHECK_MODULES([NETTLE], [nettle >= 3.1],, [
-  AC_MSG_ERROR([nettle 3.1 greater was not found. You can get it from https://www.lysator.liu.se/~nisse/nettle/])
+PKG_CHECK_MODULES([NETTLE], [nettle >= 3.3],, [
+  AC_MSG_ERROR([nettle 3.3 greater was not found. You can get it from https://www.lysator.liu.se/~nisse/nettle/])
 ])
 
 AC_SUBST(NETTLE_LIBS)
 AC_SUBST(NETTLE_CFLAGS)
 
-PKG_CHECK_MODULES([HOGWEED], [hogweed >= 3.1],, [
-  AC_MSG_ERROR([hogweed 3.1 greater was not found. You can get it from https://www.lysator.liu.se/~nisse/nettle/])
+PKG_CHECK_MODULES([HOGWEED], [hogweed >= 3.3],, [
+  AC_MSG_ERROR([hogweed 3.3 greater was not found. You can get it from https://www.lysator.liu.se/~nisse/nettle/])
 ])
 
 AC_SUBST(HOGWEED_LIBS)
@@ -140,8 +163,8 @@ AC_SUBST(HOGWEED_CFLAGS)
 # GnuTLS
 # ------
 
-PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.5.7],, [
-  AC_MSG_ERROR([GnuTLS 3.5.7 or greater was not found. You can get it from https://gnutls.org/])
+PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.5.8],, [
+  AC_MSG_ERROR([GnuTLS 3.5.8 or greater was not found. You can get it from https://gnutls.org/])
 ])
 
 AC_SUBST(GNUTLS_LIBS)
@@ -311,6 +334,7 @@ AC_SUBST(LIBFILEZILLA_LINGUAS_MO)
 # ----------------------------
 
 AM_CONDITIONAL(FZ_WINDOWS, test "$windows" = "1")
+AM_CONDITIONAL(FZ_MAC, test "$mac" = "1")
 AM_CONDITIONAL(HAVE_CPPUNIT, [test "$have_cppunit" = "yes"])
 AM_CONDITIONAL([LOCALES_ONLY], [test "$localesonly" = "yes"])
 AM_CONDITIONAL([LOCALES], [test "$locales" = "yes"])

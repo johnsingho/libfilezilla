@@ -1,3 +1,86 @@
+0.25.0 (2020-10-13)
+
++ Added fz::invoker to asynchronously call functions to run in a specific thread independent of the caller's thread
+- Added additional checks to fz::buffer to leave the buffer in a valid state in out-of-memory situations and to prevent mis-use
+- Detect a particular socket buffer tuning issue under Linux where setting a receiver buffer size shrinks the window scale factor
+- Reordered a few data members to reduce the amount of structure padding due to alignment
+
+0.24.1 (2020-08-27)
+
+- fz::to_integral can now handle strongly typed enum return types
+
+0.24.0 (2020-08-21)
+
++ Added fz::equal_consttime
+- fz::sprintf now works corrcetly if arguments are passed as (w)string_view
+
+0.23.0 (2020-07-07)
+
++ Added reader/writer locks
+- fz::mkdir can now return the the longest created path in case of partial failures
+
+0.22.0 (2020-05-12)
+
++ Added a flag to fz::file to allow creation of files with permissions only granting the current user access
++ Added fz::mkdir to create local directories, optionally recursive and with permissions to only grant the current user access to the final directory
+- MSW: Improvements handling directory reparse points
+- Lengthen partial certificate chains in fz::tls_info to include any found trust anchor if using the system trust store
+- Mark self-signed certificates in the in fz::x509_certificate
+- Fix constructing fz::uri from default-constructed string_view
+
+0.21.0 (2020-04-20)
+
++ macOS: fz::spawn_detached_process can now start application bundles
++ Changed arguments of fz::local_filesys::get_next_file to be consistent with fz::local_filesys::get_file_info
+- Improved error detection for fz::spawn_detached-process on *nix systems that support the pipe2 syscall with O_CLOEXEC
+
+0.20.2 (2020-03-10)
+
++ Add encrypt_key and decrypt_key to fz::symmetric key
+- fz::datetime::set_rfc822 now parses the zone offset
+- Removed unneeded asserts from format.hpp
+
+0.20.1 (2020-02-24)
+
+- Fix potential crash after removing the last speed limit bucket
+- TLS: Fix reported key exchange algorithm and improve details
+
+0.20.0 (2020-02-14)
+
++ Added fz::symmetric_key
++ Added itertions parameter to fz::private_key::from_password
++ Added fz::base32_encode and fz::base32_decode
++ Unified all decode functions to always return a vector, added alternatives returning string with a _s suffix in the function name
++ Changed equal_insensitive_ascii to take (w)string_view
+
+0.19.3 (2019-12-19)
+
+- Rate limiting: Fix a divide by zero when distributing overflow
+
+0.19.2 (2019-12-19)
+
++ Rate limiting: Added debt repay mechanism to bucket removal
+- *nix: Fix returned permissions in fz::local_filesys::get_file_info/get_next_file
+
+0.19.1 (2019-11-15)
+
++ Return error information to fz::local_filesys::begin_find_files
+- Fix for version.hpp not getting installed
+
+0.19.0 (2019-11-07)
+
++ Addded rate limiting code and a new rate-limited socket layer
++ Added fz::mutex::try_lock
++ Implemented libtool's library versioning scheme for shared library builds of libfilezilla
+
+0.18.2 (2019-09-16)
+
++ Added operator== and != to fz::uri
+
+0.18.1 (2019-08-14)
+
++ Added fz::buffer::resize
+
 0.18.0 (2019-08-02)
 
 + Added fz::spawn_detached_process

@@ -35,13 +35,14 @@ public:
 	void reinit();
 
 	void update(std::string_view const& data);
+	void update(std::basic_string_view<uint8_t> const& data);
 	void update(std::vector<uint8_t> const& data);
 	void update(uint8_t const* data, size_t size);
 	void update(uint8_t in) {
 		update(&in, 1);
 	}
 
-	/// Returns the raw digest and reinitalizes the accumulator
+	/// Returns the raw digest and reinitializes the accumulator
 	std::vector<uint8_t> digest();
 
 	operator std::vector<uint8_t>() {

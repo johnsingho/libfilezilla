@@ -85,6 +85,15 @@ void mutex::unlock()
 #endif
 }
 
+bool mutex::try_lock()
+{
+#ifdef FZ_WINDOWS
+	return TryEnterCriticalSection(&m_) != 0;
+#else
+	return pthread_mutex_trylock(&m_) == 0;
+#endif
+}
+
 
 condition::condition()
 {
@@ -129,7 +138,7 @@ bool condition::wait(scoped_lock& l, duration const& timeout)
 	if (ms < 0) {
 		ms = 0;
 	}
-	bool const success = SleepConditionVariableCS(&cond_, l.m_, static_cast<DWORD>(timeout.get_milliseconds())) != 0;
+	bool const success = SleepConditionVariableCS(&cond_, l.m_, static_cast<DWORD>(ms)) != 0;
 #else
 	int res;
 	timespec ts;

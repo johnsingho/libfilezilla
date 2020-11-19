@@ -9,10 +9,14 @@ libfilezilla_la_SOURCES = \
 	event_loop.cpp \
 	file.cpp \
 	hash.cpp \
+	invoker.cpp \
 	iputils.cpp \
 	local_filesys.cpp \
 	mutex.cpp \
+	nonowning_buffer.cpp \
 	process.cpp \
+	rate_limiter.cpp \
+	rate_limited_layer.cpp \
 	recursive_remove.cpp \
 	signature.cpp \
 	socket.cpp \
@@ -41,14 +45,19 @@ nobase_include_HEADERS = \
 	libfilezilla/file.hpp \
 	libfilezilla/format.hpp \
 	libfilezilla/hash.hpp \
+	libfilezilla/invoker.hpp \
 	libfilezilla/iputils.hpp \
 	libfilezilla/libfilezilla.hpp \
 	libfilezilla/local_filesys.hpp \
 	libfilezilla/logger.hpp \
 	libfilezilla/mutex.hpp \
+	libfilezilla/nonowning_buffer.hpp \
 	libfilezilla/optional.hpp \
 	libfilezilla/process.hpp \
+	libfilezilla/rate_limiter.hpp \
+	libfilezilla/rate_limited_layer.hpp \
 	libfilezilla/recursive_remove.hpp \
+	libfilezilla/rwmutex.hpp \
 	libfilezilla/shared.hpp \
 	libfilezilla/signature.hpp \
 	libfilezilla/socket.hpp \
@@ -65,9 +74,10 @@ nobase_include_HEADERS = \
 	libfilezilla/private/defs.hpp \
 	libfilezilla/private/visibility.hpp \
 	libfilezilla/private/windows.hpp \
-	libfilezilla/glue/wx.hpp
+	libfilezilla/glue/wx.hpp \
+	libfilezilla/glue/wxinvoker.hpp
 
-nodist_nobase_include_HEADERS = libfilezilla/version.hpp
+nobase_nodist_include_HEADERS = libfilezilla/version.hpp
 
 
 libfilezilla_la_LDFLAGS = $(AM_LDFLAGS)
@@ -92,7 +102,10 @@ libfilezilla_la_SOURCES += \
 nobase_include_HEADERS += \
 	libfilezilla/glue/unix.hpp
 
+endif
 
+if FZ_MAC
+libfilezilla_la_LDFLAGS += -framework CoreServices
 endif
 
 dist_noinst_HEADERS = \
@@ -100,16 +113,18 @@ dist_noinst_HEADERS = \
 	tls_system_trust_store_impl.hpp
 
 libfilezilla_la_CPPFLAGS = $(AM_CPPFLAGS)
+libfilezilla_la_CPPFLAGS += -I$(top_builddir)/config
 libfilezilla_la_CPPFLAGS += -DBUILDING_LIBFILEZILLA
 libfilezilla_la_CPPFLAGS += $(NETTLE_CFLAGS) $(GNUTLS_CFLAGS)
 
 # Needed for version.hpp in out-of-tree builds
-libfilezilla_la_CPPFLAGS += -I$(srcdir)/libfilezilla
+libfilezilla_la_CPPFLAGS += -I. -I$(srcdir)/libfilezilla
 
 libfilezilla_la_CXXFLAGS = $(AM_CXXFLAGS)
 libfilezilla_la_CXXFLAGS += -fvisibility=hidden
 
 libfilezilla_la_LDFLAGS += -no-undefined
+libfilezilla_la_LDFLAGS += -version-info $(LIBRARY_VERSION)
 
 libfilezilla_la_LIBADD += $(NETTLE_LIBS) $(HOGWEED_LIBS) $(GNUTLS_LIBS)
 

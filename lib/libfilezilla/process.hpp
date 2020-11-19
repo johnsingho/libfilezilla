@@ -9,6 +9,10 @@
 
 #include <vector>
 
+#ifdef FZ_WINDOWS
+#include "private/windows.hpp"
+#endif
+
 namespace fz {
 
 /** \brief The process class manages an asynchronous process with redirected IO.
@@ -42,6 +46,16 @@ public:
 
 	bool spawn(std::vector<native_string> const& command_with_args);
 
+#ifndef FZ_WINDOWS
+	/**
+	 * \brief Allows passing additional file descriptors to the process
+	 *
+	 * This function only exists on *nix, it is not needed on Windows where
+	 * DuplicateHandle() can be used instead with the target process as argument.
+	 */
+	bool spawn(native_string const& cmd, std::vector<native_string> const& args, std::vector<int> const& extra_fds);
+#endif
+
 	/** \brief Stops the spawned process
 	 *
 	 * This function doesn't actually kill the process, it merely closes the pipes.
@@ -72,6 +86,13 @@ public:
 	inline bool write(std::string_view const& s) {
 		return write(s.data(), static_cast<unsigned int>(s.size()));
 	}
+
+#if FZ_WINDOWS
+	/** \brief
+	 * Returns the HANDLE of the process.
+	 */
+	HANDLE handle() const;
+#endif
 
 private:
 	class impl;

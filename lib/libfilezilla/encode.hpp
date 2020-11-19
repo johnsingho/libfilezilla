@@ -23,10 +23,10 @@ namespace fz {
 template<typename Char>
 int hex_char_to_int(Char c)
 {
-	if (c >= 'a' && c <= 'z') {
+	if (c >= 'a' && c <= 'f') {
 		return c - 'a' + 10;
 	}
-	if (c >= 'A' && c <= 'Z') {
+	if (c >= 'A' && c <= 'F') {
 		return c - 'A' + 10;
 	}
 	else if (c >= '0' && c <= '9') {
@@ -118,13 +118,42 @@ std::string FZ_PUBLIC_SYMBOL base64_encode(std::vector<uint8_t> const& in, base6
  *
  * Padding is optional, alphabet is auto-detected.
  */
-std::string FZ_PUBLIC_SYMBOL base64_decode(std::string_view const& in);
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL base64_decode(std::string_view const& in);
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL base64_decode(std::wstring_view const& in);
+std::string FZ_PUBLIC_SYMBOL base64_decode_s(std::string_view const& in);
+std::string FZ_PUBLIC_SYMBOL base64_decode_s(std::wstring_view const& in);
 
 
 /**
- * \brief Percent-enodes string.
+ * \brief Alphabet variations for base32
+ * - standard: A-Z2-7 as per RFC4648
+ * - base32hex: Tricontakaidecimal, natural extension of hex with letters G through V
+ * - locale_safe: Does not contain the letter i
+ */
+enum class base32_type {
+	standard,
+	base32hex,
+	locale_safe
+};
+
+/// \brief Encodes raw input string to base32
+std::string FZ_PUBLIC_SYMBOL base32_encode(std::string_view const& in, base32_type type = base32_type::standard, bool pad = true);
+std::string FZ_PUBLIC_SYMBOL base32_encode(std::vector<uint8_t> const& in, base32_type type = base32_type::standard, bool pad = true);
+
+/**
+ * \brief Decodes base32, ignores whitespace. Returns empty string on invalid input.
  *
- * The characters A-Z, a-z, 0-9, hyphen, underscore, period, tilde are not percent-encoded, optionally slashes arne't encoded either.
+ * Padding is optional.
+ */
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL base32_decode(std::string_view const& in, base32_type type = base32_type::standard);
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL base32_decode(std::wstring_view const& in, base32_type type = base32_type::standard);
+std::string FZ_PUBLIC_SYMBOL base32_decode_s(std::string_view const& in, base32_type type = base32_type::standard);
+std::string FZ_PUBLIC_SYMBOL base32_decode_s(std::wstring_view const& in, base32_type type = base32_type::standard);
+
+/**
+ * \brief Percent-encodes string.
+ *
+ * The characters A-Z, a-z, 0-9, hyphen, underscore, period, tilde are not percent-encoded, optionally slashes aren't encoded either.
  * Every other character is encoded.
  *
  * \param keep_slashes If set, slashes are not encoded.
@@ -133,9 +162,9 @@ std::string FZ_PUBLIC_SYMBOL percent_encode(std::string_view const& s, bool keep
 std::string FZ_PUBLIC_SYMBOL percent_encode(std::wstring_view const& s, bool keep_slashes = false);
 
 /**
- * \brief Percent-enodes wide-character. Non-ASCII characters are converted to UTF-8 befor they are encoded.
+ * \brief Percent-encodes wide-character. Non-ASCII characters are converted to UTF-8 before they are encoded.
  *
- * \sa \ref fz::percent-encode
+ * \sa \ref fz::percent_encode
  */
 std::wstring FZ_PUBLIC_SYMBOL percent_encode_w(std::wstring_view const& s, bool keep_slashes = false);
 
@@ -144,7 +173,10 @@ std::wstring FZ_PUBLIC_SYMBOL percent_encode_w(std::wstring_view const& s, bool 
  *
  * If the string cannot be decoded, an empty string is returned.
  */
-std::string FZ_PUBLIC_SYMBOL percent_decode(std::string_view const& s, bool allow_embedded_null = false);
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL percent_decode(std::string_view const& s, bool allow_embedded_null = false);
+std::vector<uint8_t> FZ_PUBLIC_SYMBOL percent_decode(std::wstring_view const& s, bool allow_embedded_null = false);
+std::string FZ_PUBLIC_SYMBOL percent_decode_s(std::string_view const& s, bool allow_embedded_null = false);
+std::string FZ_PUBLIC_SYMBOL percent_decode_s(std::wstring_view const& s, bool allow_embedded_null = false);
 
 }
 
